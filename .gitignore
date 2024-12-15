@@ -1,0 +1,13 @@
+__pycache__/*
+.ipynb_checkpoints/*
+callback/*
+singularity/tmp/*
+log/*
+.local/*
+src/__pycache__/*
+
+config.ini
+*.sif
+run.sh
+chokosen-loveti.*
+*.out
