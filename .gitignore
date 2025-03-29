@@ -11,3 +11,4 @@ config.ini
 run.sh
 chokosen-loveti.*
 *.out
+*.csv

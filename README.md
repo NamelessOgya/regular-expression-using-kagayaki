@@ -3,7 +3,9 @@
 WIP  
 
 ## 概要  
-WIP  
+GPUを用いて正規表現マッチの高速化をGPUを用いて行う。 
+[Regular Expression Matching Can Be Simple And Fast](https://swtch.com/~rsc/regexp/regexp1.html)の実装をGPUで高速化する。  
+
 
 ## 実行準備  
 ### 1. コードの修正  
@@ -12,39 +14,12 @@ WIP
 ### 2. ビルド済みコンテナの取得  
 repositoryのルートディレクトリから
 ```
-./make_new_sif_env.sh
+.env/kagayaki_sh/make_new_sif_env.sh
 ```
 これで./singularity/ubuntu.sifが作成される。  
   
-## batch実行  
-WIP  
-  
-## 対話的実行  
-kagayakiのinteractive nodeへログイン  
+## cpu版でのテスト実行    
 ```
-qsub -q DEFAULT -l select=1 -I
-```  
-コンパイル    
+compile_and_conduct_test_cpu.sh
 ```
-g++ -o hello.out hello.cpp
-```
-実行    
-```
-./hello.out
-```
-
-
-### 結果確認    
-WIP  
-
-## 便利コマンド  
-### 自分のjobを確認  
-```
-qstat -u (ログインユーザー名)  
-```
-
-### 自分のjobを削除  
-```
-qdel [job名 .spcc-xxxxみたいなやつ]  
-```  
-
+実行完了すると```./results/```に実行結果がcsv排出される。
