@@ -1,1 +1,1 @@
-docker pull namelessogya/re_exp_env:cpu
+docker pull nvidia/cuda:11.8.0-devel-ubuntu22.04
