@@ -5,7 +5,8 @@
 
 #define MAX_LINE_LENGTH 256
 #define MAX_COMMAND_LENGTH 1024
-#define OUTPUT_CSV_TEMPLATE "./results/results_%s.csv"
+// #define OUTPUT_CSV_TEMPLATE "./results/results_%s.csv"
+#define OUTPUT_CSV_TEMPLATE "./results/results_%s%s.csv"   /* ← %s を 2 つに */
 #define NFA_EXECUTABLE "./nfa.out"
 
 // 現在の JST 時刻を "YYYYMMDD_HH_MM" 形式で取得
@@ -16,7 +17,8 @@ void get_jst_timestamp(char *buffer, size_t size) {
     time(&rawtime);
     timeinfo = localtime(&rawtime); // システムのタイムゾーン（通常 JST）
 
-    strftime(buffer, size, "%Y%m%d_%H_%M", timeinfo);
+    // strftime(buffer, size, "%Y%m%d_%H_%M", timeinfo);
+    strftime(buffer, size, "%Y%m%d_%H_%M_%S", timeinfo); 
 }
 
 // CSVのヘッダーを書き込む
@@ -43,9 +45,17 @@ int main() {
     char timestamp[20];
     get_jst_timestamp(timestamp, sizeof(timestamp));
 
+    /* ----- GPU 版判定： -DGPU_RUN 付きでビルドした場合だけ "_gpu" ----- */
+    const char *gpu_suffix = "";
+    #ifdef GPU_RUN
+        gpu_suffix = "_gpu";
+    #endif
+
     // ファイル名を動的に作成
     char output_csv[50];
-    snprintf(output_csv, sizeof(output_csv), OUTPUT_CSV_TEMPLATE, timestamp);
+    // snprintf(output_csv, sizeof(output_csv), OUTPUT_CSV_TEMPLATE, timestamp);
+    snprintf(output_csv, sizeof(output_csv),
+             OUTPUT_CSV_TEMPLATE, timestamp, gpu_suffix);
 
     FILE *csv_out = fopen(output_csv, "w");
     if (!csv_out) {
