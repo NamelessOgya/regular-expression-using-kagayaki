@@ -170,12 +170,14 @@
      cudaMemcpy(h_res.data(), d_res, n_inputs*sizeof(int), cudaMemcpyDeviceToHost);
  
      for (int i = 0; i < n_inputs; ++i)
-         if (h_res[i]) std::cout << argv[i+2] << '\n';
+        //  if (h_res[i]) std::cout << argv[i+2] << '\n';
+        if (h_res[i]) printf("%s\n", argv[i+2]);
  
      /* ---------- 7. 後始末 ---------- */
      cudaFree(d_states); cudaFree(d_texts);
      cudaFree(d_off);    cudaFree(d_len); cudaFree(d_res);
- 
+     
+    
      return 0;
  }
  
