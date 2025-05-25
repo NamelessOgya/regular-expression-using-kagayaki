@@ -19,6 +19,7 @@
  #include "nfa.h"
 
  
+ 
  /*
   * Convert infix regexp re to postfix notation.
   * Insert . as explicit concatenation operator.
@@ -228,8 +229,8 @@ State matchstate = {
   * Convert postfix regular expression to NFA.
   * Return start state.
   */
- State*
- post2nfa(char *postfix)
+ State
+ *post2nfa(char *postfix)
  {
      char *p;
      Frag stack[1000], *stackp, e1, e2, e;

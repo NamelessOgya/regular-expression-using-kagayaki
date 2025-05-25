@@ -8,6 +8,12 @@
 #include "config.h"
 #include "nfa.h"
 
+char line[MAX_LINE_LENGTH];
+char regex[MAX_LINE_LENGTH] = "";
+char target[MAX_LINE_LENGTH]; //正規表現マッチの検索対象文字列
+char target_list[MAX_SENTENCE_LENGTH][MAX_LINE_LENGTH]; //検索対象を\nで分割し、リストにしたもの。
+char result[MAX_RESULT_LENGTH];
+
 // 現在の JST 時刻を "YYYYMMDD_HH_MM" 形式で取得
 // buffer変数への書き込みを行う。
 void get_jst_timestamp(char *buffer, size_t size) {
@@ -91,7 +97,7 @@ size_t split_str_to_array(const char *src, char lines[][MAX_LINE_LENGTH]) {
     char *p   = work;
     char *tok;
 
-    while (n < MAX_LINE_LENGTH && (tok = strsep(&p, ".")) != NULL) {
+    while (n < MAX_SENTENCE_LENGTH && (tok = strsep(&p, ".")) != NULL) {
         /* 255 文字までコピーして必ず終端する */
         strncpy(lines[n], tok, MAX_LINE_LENGTH - 1);
         lines[n][MAX_LINE_LENGTH - 1] = '\0';
@@ -103,7 +109,7 @@ size_t split_str_to_array(const char *src, char lines[][MAX_LINE_LENGTH]) {
 }
 
 void join_matches(char *result, size_t cap,
-                  const char list[][MAX_LINE_LENGTH],
+                  const char list[][MAX_RESULT_LENGTH],
                   const size_t *idx, size_t n)
 {
     result[0] = '\0';
@@ -113,6 +119,7 @@ void join_matches(char *result, size_t cap,
             strncat(result, ".", cap - strlen(result) - 1);
         }
         /* マッチ文字列を追加 */
+        printf("%s", list[idx[i]]);
         strncat(result, list[idx[i]], cap - strlen(result) - 1);
     }
 }
@@ -126,11 +133,7 @@ int main() {
     FILE *csv_out = fopen(output_csv, "w");
     write_csv_header(csv_out); // ヘッダー行を追加
 
-    char line[MAX_LINE_LENGTH];
-    char regex[MAX_LINE_LENGTH] = "";
-    char target[MAX_LINE_LENGTH]; //正規表現マッチの検索対象文字列
-    char target_list[MAX_SENTENCE_LENGTH][MAX_LINE_LENGTH]; //検索対象を\nで分割し、リストにしたもの。
-    char result[MAX_LINE_LENGTH];
+
 
     // char csv_record[NUM_COL][MAX_LINE_LENGTH];
 
@@ -171,7 +174,7 @@ int main() {
 
         printf("Query: %s\n", regex);
         printf("Target: %s\n", target);
-        // printf("Matched: %zu\n", k);
+        printf("Matched: %zu\n", k);
         printf("Execution Time: %.6f sec\n", case_time);
         printf("------------------------\n");
 
