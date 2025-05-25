@@ -15,6 +15,10 @@
  #include <stdlib.h>
  #include <string.h>
  #include <unistd.h>
+ #include "config.h"
+ #include "nfa.h"
+
+ 
  
  /*
   * Convert infix regexp re to postfix notation.
@@ -24,6 +28,12 @@
  char*
  re2post(char *re)
  {
+    /*
+        正規表現を「後置表現」に変換する。
+        
+        後置表現...演算子をオペランドの後ろに記載する記法
+        後置表現で実装することで、一文字読み込んでスタック操作の流れのみで実装が可能になり便利。
+    */
      int nalt, natom;
      static char buf[8000];
      char *dst;
@@ -35,7 +45,7 @@
      p = paren;
      dst = buf;
      nalt = 0;
-     natom = 0;
+     natom = 0; //今開いているカッコレベルでまだ連結演算子.を出力していないatomの数
      if(strlen(re) >= sizeof buf/2)
          return NULL;
      for(; *re; re++){
@@ -43,7 +53,7 @@
          case '(':
              if(natom > 1){
                  --natom;
-                 *dst++ = '.';
+                 *dst++ = '#';
              }
              if(p >= paren+100)
                  return NULL;
@@ -57,7 +67,7 @@
              if(natom == 0)
                  return NULL;
              while(--natom > 0)
-                 *dst++ = '.';
+                 *dst++ = '#';
              nalt++;
              break;
          case ')':
@@ -66,7 +76,7 @@
              if(natom == 0)
                  return NULL;
              while(--natom > 0)
-                 *dst++ = '.';
+                 *dst++ = '#';
              for(; nalt > 0; nalt--)
                  *dst++ = '|';
              --p;
@@ -84,7 +94,7 @@
          default:
              if(natom > 1){
                  --natom;
-                 *dst++ = '.';
+                 *dst++ = '#';
              }
              *dst++ = *re;
              natom++;
@@ -94,7 +104,7 @@
      if(p != paren)
          return NULL;
      while(--natom > 0)
-         *dst++ = '.';
+         *dst++ = '#';
      for(; nalt > 0; nalt--)
          *dst++ = '|';
      *dst = 0;
@@ -110,7 +120,8 @@
  enum
  {
      Match = 256,
-     Split = 257
+     Split = 257,
+     Any   = 258,    /* 追加：ワイルドカード */
  };
  typedef struct State State;
  struct State
@@ -120,7 +131,14 @@
      State *out1;
      int lastlist;
  };
- State matchstate = { Match };	/* matching state */
+/* matching state: 全フィールドを明示的に初期化 */
+State matchstate = {
+    .c        = Match,
+    .out      = NULL,
+    .out1     = NULL,
+    .lastlist = 0
+};
+
  int nstate;
  
  /* Allocate and initialize State */
@@ -211,8 +229,8 @@
   * Convert postfix regular expression to NFA.
   * Return start state.
   */
- State*
- post2nfa(char *postfix)
+ State
+ *post2nfa(char *postfix)
  {
      char *p;
      Frag stack[1000], *stackp, e1, e2, e;
@@ -229,11 +247,12 @@
      stackp = stack;
      for(p=postfix; *p; p++){
          switch(*p){
-         default:
-             s = state(*p, NULL, NULL);
+         case '.':  /* ワイルドカード */
+             /* Any 状態を作り出して list1(&s->out) */
+             s = state(Any, NULL, NULL);
              push(frag(s, list1(&s->out)));
              break;
-         case '.':	/* catenate */
+         case '#':	/* catenate */
              e2 = pop();
              e1 = pop();
              patch(e1.out, e2.start);
@@ -261,6 +280,10 @@
              s = state(Split, e.start, NULL);
              patch(e.out, s);
              push(frag(e.start, list1(&s->out1)));
+             break;
+         default:
+             s = state((unsigned char)*p, NULL, NULL);
+             push(frag(s, list1(&s->out)));
              break;
          }
      }
@@ -340,7 +363,7 @@
      nlist->n = 0;
      for(i=0; i<clist->n; i++){
          s = clist->s[i];
-         if(s->c == c)
+         if(s->c == c || s->c == Any)   /* Any はどんな文字ともマッチ */
              addstate(nlist, s->out);
      }
  }
@@ -349,7 +372,7 @@
  int
  match(State *start, char *s)
  {
-     int i, c;
+     int c;
      List *clist, *nlist, *t;
  
      clist = startlist(start, &l1);
@@ -359,40 +382,112 @@
          step(clist, c, nlist);
          t = clist; clist = nlist; nlist = t;	/* swap clist, nlist */
      }
+     
      return ismatch(clist);
  }
- 
- int
- main(int argc, char **argv)
- {
-     int i;
-     char *post;
-     State *start;
- 
-     if(argc < 3){
-         fprintf(stderr, "usage: nfa regexp string...\n");
-         return 1;
-     }
-     
-     post = re2post(argv[1]);
-     if(post == NULL){
-         fprintf(stderr, "bad regexp %s\n", argv[1]);
-         return 1;
-     }
- 
-     start = post2nfa(post);
-     if(start == NULL){
-         fprintf(stderr, "error in post2nfa %s\n", post);
-         return 1;
-     }
-     
-     l1.s = malloc(nstate*sizeof l1.s[0]);
-     l2.s = malloc(nstate*sizeof l2.s[0]);
-     for(i=2; i<argc; i++)
-         if(match(start, argv[i]))
-             printf("%s\n", argv[i]);
-     return 0;
- }
+
+/* --- 追加: NFA ラッパ構造体 ------------------- */
+struct NFA {
+    State  *start;   /* 受理オートマトン先頭 */
+    State **state_pool; /* malloc した State* 配列 for free */
+    size_t  nstate;
+    List    l1, l2;  /* 再利用するリスト領域 */
+};
+
+int nfa_test(const NFA *nfa, const char *text)
+{
+    /* NFA が持つ２つの List 領域を参照 */
+    List *clist = startlist(nfa->start, &nfa->l1);
+    List *nlist = &nfa->l2;
+
+    /* each char */
+    for (const unsigned char *p = (const unsigned char*)text; *p; ++p) {
+        /* 今の状態集合 clist から文字 *p を遷移して nlist へ */
+        step(clist, *p, nlist);
+        /* clist と nlist をスワップ */
+        List *tmp = clist;
+        clist = nlist;
+        nlist = tmp;
+    }
+    /* 最後の状態集合に Match があれば 1、なければ 0 */
+    return ismatch(clist);
+}
+
+/* --- compile --------------------------------- */
+NFA *nfa_compile(const char *regex)
+{
+    /*
+        正規表現をコンパイルして NFA を生成する。
+        検索の都度作るのは効率が悪いので一度作って再利用。
+        生成された NFA は、マッチングのために使用される。
+    */
+    char  *post = re2post((char *)regex);
+    if (!post) return NULL;
+
+    State *start = post2nfa(post);
+    if (!start)  return NULL;
+
+    /* プール確保 (nstate は post2nfa 内の global) */
+    NFA *nfa = malloc(sizeof *nfa);
+    nfa->start = start;
+    nfa->nstate = nstate;
+    nfa->state_pool = malloc(nstate * sizeof(State *));
+    /* 生成された State を DFS で収集して pool に詰める …省略(※) */
+
+    /* List 配列もここで確保 */
+    nfa->l1.s = malloc(nstate * sizeof(State *));
+    nfa->l2.s = malloc(nstate * sizeof(State *));
+    return nfa;
+}
+
+// /* --- grep (複数まとめて) ---------------------- */
+// size_t nfa_grep_idx(const NFA            *nfa,
+//                     const char *const    *list,
+//                     size_t                n,
+//                     size_t               *out_idx)
+// {
+//     if (!nfa || !list) return 0;
+
+//     size_t hit = 0;
+//     for (size_t i = 0; i < n; ++i) {
+//         if (nfa_test(nfa, list[i])) {
+//             if (out_idx) out_idx[hit] = i;
+//             ++hit;
+//         }
+//     }
+//     return hit;
+// }
+
+size_t nfa_grep_idx_arr(const NFA *nfa,
+                        const char list[][MAX_LINE_LENGTH],
+                        size_t     n,
+                        size_t    *out_idx)
+{
+    if (!nfa || !list) return 0;
+
+    size_t hit = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (list[i][0] == '\0')        /* 空行ならスキップしたい場合 */
+            continue;
+        if (nfa_test(nfa, list[i])) {
+            if (out_idx) out_idx[hit] = i;
+            ++hit;
+        }
+    }
+    return hit;
+}
+
+/* --- free ------------------------------------ */
+void nfa_free(NFA *nfa)
+{
+    if (!nfa) return;
+    for (size_t i = 0; i < nfa->nstate; ++i)
+        free(nfa->state_pool[i]);
+    free(nfa->state_pool);
+    free(nfa->l1.s);
+    free(nfa->l2.s);
+    free(nfa);
+}
  
  /*
   * Permission is hereby granted, free of charge, to any person
