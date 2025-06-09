@@ -41,7 +41,7 @@ void remove_trailing_newline(char *s) {
 
 // CSVのヘッダーを書き込む
 void write_csv_header(FILE *file) {
-    fprintf(file, "正規表現,検索対象,マッチ結果,実行時間(秒)\n");
+    fprintf(file, "regex,target,result,time(sec)\n");
 }
 
 // CSVのファイル名を生成
