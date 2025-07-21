@@ -1,0 +1,15 @@
+{
+  "name": "ubuntu-dev-env",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "settings": {
+    "terminal.integrated.defaultProfile.linux": "bash"
+  },
+  "extensions": [
+    "ms-vscode.cpptools",         // C++サポート
+    "ms-vscode.cmake-tools",      // CMakeサポート
+    "xaver.clang-format"          // clang-formatサポート
+  ],
+  "remoteUser": "root"
+}
