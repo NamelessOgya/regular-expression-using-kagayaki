@@ -1,6 +1,5 @@
 /* nfa.h */
-#ifndef NFA_H_
-#define NFA_H_
+#pragma once
 
 #include "config.h"
 #include <stddef.h>   /* size_t 用 */
@@ -24,4 +23,3 @@ size_t nfa_grep_idx_arr(
         size_t     n,
         size_t    *out_idx);
 
-#endif /* NFA_H_ */

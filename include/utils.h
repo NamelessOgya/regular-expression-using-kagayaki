@@ -1,5 +1,4 @@
-#ifndef UTILS_H
-#define UTILS_H
+#pragma once
 
 #include <stdio.h>
 #include <stddef.h>
@@ -17,4 +16,4 @@ size_t split_csv_static(char *line, char *regex, char *target, size_t buflen);
 size_t split_str_to_array(const char *src, char lines[][MAX_LINE_LENGTH]);
 void join_matches(char *result, size_t cap, const char list[][MAX_RESULT_LENGTH], const size_t *idx, size_t n);
 
-#endif /* UTILS_H */
+

@@ -25,91 +25,119 @@
   * Insert . as explicit concatenation operator.
   * Cheesy parser, return static buffer.
   */
- char*
- re2post(char *re)
- {
-    /*
-        正規表現を「後置表現」に変換する。
-        
-        後置表現...演算子をオペランドの後ろに記載する記法
-        後置表現で実装することで、一文字読み込んでスタック操作の流れのみで実装が可能になり便利。
-    */
-     int nalt, natom;
-     static char buf[8000];
-     char *dst;
-     struct {
-         int nalt;
-         int natom;
-     } paren[100], *p;
-     
-     p = paren;
-     dst = buf;
-     nalt = 0;
-     natom = 0; //今開いているカッコレベルでまだ連結演算子.を出力していないatomの数
-     if(strlen(re) >= sizeof buf/2)
-         return NULL;
-     for(; *re; re++){
-         switch(*re){
-         case '(':
-             if(natom > 1){
-                 --natom;
-                 *dst++ = '#';
-             }
-             if(p >= paren+100)
-                 return NULL;
-             p->nalt = nalt;
-             p->natom = natom;
-             p++;
-             nalt = 0;
-             natom = 0;
-             break;
-         case '|':
-             if(natom == 0)
-                 return NULL;
-             while(--natom > 0)
-                 *dst++ = '#';
-             nalt++;
-             break;
-         case ')':
-             if(p == paren)
-                 return NULL;
-             if(natom == 0)
-                 return NULL;
-             while(--natom > 0)
-                 *dst++ = '#';
-             for(; nalt > 0; nalt--)
-                 *dst++ = '|';
-             --p;
-             nalt = p->nalt;
-             natom = p->natom;
-             natom++;
-             break;
-         case '*':
-         case '+':
-         case '?':
-             if(natom == 0)
-                 return NULL;
-             *dst++ = *re;
-             break;
-         default:
-             if(natom > 1){
-                 --natom;
-                 *dst++ = '#';
-             }
-             *dst++ = *re;
-             natom++;
-             break;
-         }
-     }
-     if(p != paren)
-         return NULL;
-     while(--natom > 0)
-         *dst++ = '#';
-     for(; nalt > 0; nalt--)
-         *dst++ = '|';
-     *dst = 0;
-     return buf;
- }
+char*
+re2post(char *re)
+{
+   /*
+       正規表現を「後置表現（逆ポーランド記法）」に変換する。
+       
+       後置表現...演算子をオペランドの後ろに記載する記法
+       後置表現で実装することで、一文字読み込んでスタック操作の流れのみで実装が可能になり便利。
+   */
+    int num_alt = 0;
+    int num_atom = 0; //今開いているカッコレベルでまだ連結演算子.を出力していないatomの数
+    static char postfix_buffer[8000];
+    char *dest = postfix_buffer;
+    
+    struct {
+        int num_alt;
+        int num_atom;
+    } parentheses[100];
+    
+    // 現在のカッコの深さを指すポインタ
+    int paren_index = 0;
+    
+    if (strlen(re) >= sizeof(postfix_buffer) / 2) {
+        return NULL;
+    }
+    
+    for (char *current_char = re; *current_char != '\0'; current_char++) {
+        switch (*current_char) {
+        case '(':
+            if (num_atom > 1) {
+                num_atom--;
+                *dest = '#';
+                dest++;
+            }
+            if (paren_index >= 100) {
+                return NULL;
+            }
+            parentheses[paren_index].num_alt = num_alt;
+            parentheses[paren_index].num_atom = num_atom;
+            paren_index++;
+            num_alt = 0;
+            num_atom = 0;
+            break;
+            
+        case '|':
+            if (num_atom == 0) {
+                return NULL;
+            }
+            while (num_atom > 1) {
+                num_atom--;
+                *dest = '#';
+                dest++;
+            }
+            num_atom = 0; // 選択肢の区切りなので、atom数をリセット！
+            num_alt++;
+            break;
+            
+        case ')':
+            if (paren_index == 0 || num_atom == 0) {
+                return NULL;
+            }
+            while (num_atom > 1) {
+                num_atom--;
+                *dest = '#';
+                dest++;
+            }
+            for (; num_alt > 0; num_alt--) {
+                *dest = '|';
+                dest++;
+            }
+            paren_index--;
+            num_alt = parentheses[paren_index].num_alt;
+            num_atom = parentheses[paren_index].num_atom;
+            num_atom++;
+            break;
+            
+        case '*':
+        case '+':
+        case '?':
+            if (num_atom == 0) {
+                return NULL;
+            }
+            *dest = *current_char;
+            dest++;
+            break;
+            
+        default:
+            if (num_atom > 1) {
+                num_atom--;
+                *dest = '#';
+                dest++;
+            }
+            *dest = *current_char;
+            dest++;
+            num_atom++;
+            break;
+        }
+    }
+    if (paren_index != 0) {
+        return NULL;
+    }
+    while (num_atom > 1) {
+        num_atom--;
+        *dest = '#';
+        dest++;
+    }
+    for (; num_alt > 0; num_alt--) {
+        *dest = '|';
+        dest++;
+    }
+    *dest = '\0';
+    return postfix_buffer;
+}
  
  /*
   * Represents an NFA state plus zero or one or two arrows exiting.

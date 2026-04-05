@@ -5,8 +5,7 @@
  *  切り出したヘッダ。CUDA 版 (nfa.cu) からインクルードして使用する。
  *  MIT License (原著: Russ Cox, 2007)
  * =======================================================================*/
- #ifndef NFA_CPU_COMMON_H
- #define NFA_CPU_COMMON_H
+ #pragma once
  
  #include <cstdio>
  #include <cstdlib>
@@ -26,45 +25,115 @@
  extern State matchstate;
  
  /*--------------------------- re2post -----------------------------------*/
- static inline char* re2post(char *re)
- {
-     int nalt = 0, natom = 0;
-     static char buf[8000];
-     char *dst  = buf;
- 
-     struct { int nalt, natom; } paren[100], *p = paren;
-     if (strlen(re) >= sizeof buf / 2) return nullptr;
- 
-     for (; *re; ++re) {
-         switch (*re) {
-         case '(':
-             if (natom > 1) { --natom; *dst++ = '.'; }
-             if (p >= paren + 100) return nullptr;
-             p->nalt = nalt;  p->natom = natom;  ++p;
-             nalt = natom = 0; break;
-         case '|':
-             if (natom == 0) return nullptr;
-             while (--natom > 0) *dst++ = '.';
-             ++nalt; break;
-         case ')':
-             if (p == paren || natom == 0) return nullptr;
-             while (--natom > 0) *dst++ = '.';
-             for (; nalt > 0; --nalt) *dst++ = '|';
-             --p;  nalt = p->nalt;  natom = ++p->natom; break;
-         case '*': case '+': case '?':
-             if (natom == 0) return nullptr;
-             *dst++ = *re; break;
-         default:
-             if (natom > 1) { --natom; *dst++ = '.'; }
-             *dst++ = *re; ++natom; break;
-         }
-     }
-     if (p != paren) return nullptr;
-     while (--natom > 0) *dst++ = '.';
-     for (; nalt > 0; --nalt) *dst++ = '|';
-     *dst = '\0';
-     return buf;
- }
+static inline char* re2post(char *re)
+{
+    int num_alt = 0;
+    int num_atom = 0;
+    static char postfix_buffer[8000];
+    char *dest = postfix_buffer;
+    
+    struct {
+        int num_alt;
+        int num_atom;
+    } parentheses[100];
+    
+    int paren_index = 0;
+    
+    if (strlen(re) >= sizeof(postfix_buffer) / 2) {
+        return nullptr;
+    }
+    
+    for (char *current_char = re; *current_char != '\0'; current_char++) {
+        switch (*current_char) {
+        case '(':
+            if (num_atom > 1) {
+                num_atom--;
+                *dest = '.';
+                dest++;
+            }
+            if (paren_index >= 100) {
+                return nullptr;
+            }
+            parentheses[paren_index].num_alt = num_alt;
+            parentheses[paren_index].num_atom = num_atom;
+            paren_index++;
+            num_alt = 0;
+            num_atom = 0;
+            break;
+            
+        case '|':
+            if (num_atom == 0) {
+                return nullptr;
+            }
+            while (num_atom > 1) {
+                num_atom--;
+                *dest = '.';
+                dest++;
+            }
+            num_atom = 0;
+            num_alt++;
+            break;
+            
+        case ')':
+            if (paren_index == 0 || num_atom == 0) {
+                return nullptr;
+            }
+            while (num_atom > 1) {
+                num_atom--;
+                *dest = '.';
+                dest++;
+            }
+            for (; num_alt > 0; num_alt--) {
+                *dest = '|';
+                dest++;
+            }
+            paren_index--;
+            num_alt = parentheses[paren_index].num_alt;
+            num_atom = parentheses[paren_index].num_atom;
+            num_atom++;
+            break;
+            
+        case '*':
+        case '+':
+        case '?':
+            if (num_atom == 0) {
+                return nullptr;
+            }
+            *dest = *current_char;
+            dest++;
+            break;
+            
+        default:
+            if (num_atom > 1) {
+                num_atom--;
+                *dest = '.';
+                dest++;
+            }
+            *dest = *current_char;
+            dest++;
+            num_atom++;
+            break;
+        }
+    }
+    
+    if (paren_index != 0) {
+        return nullptr;
+    }
+    
+    while (num_atom > 1) {
+        num_atom--;
+        *dest = '.';
+        dest++;
+    }
+    
+    for (; num_alt > 0; num_alt--) {
+        *dest = '|';
+        dest++;
+    }
+    
+    *dest = '\0';
+    return postfix_buffer;
+}
  
  /*--------------------------- NFA 構築ユーティリティ --------------------*/
  inline State* state(int c, State *out, State *out1)
@@ -122,5 +191,5 @@
  #   undef POP
  }
  
- #endif /* NFA_CPU_COMMON_H */
+
  

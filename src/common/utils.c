@@ -25,7 +25,9 @@ double now_sec(void)
 
 void remove_trailing_newline(char *s) {
     char *p = strchr(s, '\n');
-    if (p) *p = '\0';
+    if (p != NULL) {
+        *p = '\0';
+    }
 }
 
 // CSVのヘッダーを書き込む
@@ -46,11 +48,13 @@ void generate_csv_filename(char *filename, size_t size) {
     snprintf(filename, size, OUTPUT_CSV_TEMPLATE, timestamp, gpu_suffix);
 }
 
-// 与えられた文字列lineを区切ってtokens配列に格納
+// 与えられた文字列lineをカンマ(,)で区切って変数に格納
 size_t split_csv_static(char *line, char *regex, char *target, size_t buflen) {
     size_t n = 0;
-    char *tok;
-    for (tok = strtok(line, ","); tok != NULL; tok = strtok(NULL, ",")) {
+    
+    // strtokは呼び出すたびに、区切り文字までを切り出して先頭のポインタを返してくれる便利な関数です
+    char *tok = strtok(line, ",");
+    while (tok != NULL) {
         n++;
         if (n == 1) {
             strncpy(regex, tok, buflen - 1);
@@ -59,6 +63,9 @@ size_t split_csv_static(char *line, char *regex, char *target, size_t buflen) {
             strncpy(target, tok, buflen - 1);
             target[buflen - 1] = '\0';
         }
+        
+        // NULLを渡すと「さっきの続きから」という意味になります
+        tok = strtok(NULL, ",");
     }
     return n;        
 }
@@ -72,9 +79,14 @@ size_t split_str_to_array(const char *src, char lines[][MAX_LINE_LENGTH]) {
 
     size_t n = 0;
     char *p = work;
+    // strsepは文字列を区切って、次のポインタへ進めてくれる関数です
     char *tok;
-
-    while (n < MAX_SENTENCE_LENGTH && (tok = strsep(&p, ".")) != NULL) {
+    while (n < MAX_SENTENCE_LENGTH) {
+        tok = strsep(&p, ".");
+        if (tok == NULL) {
+            break; // これ以上区切れる文字列がない場合は終了
+        }
+        
         strncpy(lines[n], tok, MAX_LINE_LENGTH - 1);
         lines[n][MAX_LINE_LENGTH - 1] = '\0';
         ++n;

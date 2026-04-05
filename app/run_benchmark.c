@@ -9,6 +9,11 @@
 #include "nfa.h"
 #include "utils.h"
 
+/* 
+ * 以下の配列は非常にサイズが大きいため（MAX_SENTENCE_LENGTH = 100,000など）、
+ * main関数の中（ローカル変数）に作ると「スタックオーバーフロー」というエラーでクラッシュする可能性があります。
+ * それを防ぐため、安全なメモリ領域（BSSというデータ領域）に確保される「グローバル変数」として定義しています。
+ */
 char line[MAX_LINE_LENGTH];
 char regex[MAX_LINE_LENGTH] = "";
 char target[MAX_LINE_LENGTH]; //正規表現マッチの検索対象文字列
@@ -21,10 +26,7 @@ int main() {
         perror("Failed to open ./data/test_cases.csv");
         return 1;
     }
-    if (!file) {
-        perror("Failed to open ./data/test_cases.csv");
-        return 1;
-    }
+
 
     char output_csv[50];
     generate_csv_filename(output_csv, sizeof output_csv);
