@@ -16,5 +16,8 @@ RUN apt install -y wget \
   git \
   clang-format
 
+# Taskランナーのインストール
+RUN sh -c "$(wget -qO- https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
 # ログイン時やコマンド実行時に自動で /app ディレクトリに移動する
 WORKDIR /app

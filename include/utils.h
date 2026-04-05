@@ -14,6 +14,6 @@ void write_csv_header(FILE *file);
 void generate_csv_filename(char *filename, size_t size);
 size_t split_csv_static(char *line, char *regex, char *target, size_t buflen);
 size_t split_str_to_array(const char *src, char lines[][MAX_LINE_LENGTH]);
-void join_matches(char *result, size_t cap, const char list[][MAX_RESULT_LENGTH], const size_t *idx, size_t n);
+int join_matches(char *result, size_t cap, const char list[][MAX_RESULT_LENGTH], const size_t *idx, size_t n);
 
 

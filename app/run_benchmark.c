@@ -47,12 +47,20 @@ int main() {
             continue;
         }
 
-        split_csv_static(line, regex, target, sizeof(regex));
+        if (split_csv_static(line, regex, target, sizeof(regex)) == (size_t)-1) {
+            fprintf(stderr, "[Fatal Error] Benchmark aborted: Failure to parse CSV line.\n");
+            exit(EXIT_FAILURE);
+        }
         remove_trailing_newline(target);
         printf("regex: %s\n", regex);
         printf("target: %s\n", target);
 
         size_t n = split_str_to_array(target, target_list);
+        if (n == (size_t)-1) {
+            fprintf(stderr, "[Fatal Error] Benchmark aborted: Failure to split string.\n");
+            exit(EXIT_FAILURE);
+        }
+
         printf("n: %zu\n", n);
 
         case_start = now_sec();
@@ -71,7 +79,10 @@ int main() {
         printf("Execution Time: %.6f sec\n", case_time);
         printf("------------------------\n");
 
-        join_matches(result, sizeof(result), target_list, hit_idx, k);
+        if (join_matches(result, sizeof(result), target_list, hit_idx, k) == -1) {
+            fprintf(stderr, "[Fatal Error] Benchmark aborted: Failure to join matches.\n");
+            exit(EXIT_FAILURE);
+        }
         fprintf(csv_out, "\"%s\",\"%s\",\"%s\",%.6f\n", regex, target, result, case_time);
 
         total_time += case_time;

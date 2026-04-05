@@ -1,0 +1,94 @@
+version: '3'
+
+vars:
+  CC: gcc
+  NVCC: nvcc
+  INC: -I./include -I./src/gpu
+  CFLAGS: "-Wall -Wextra -g"
+  CFLAGS_OPT: -O3
+  CFLAGS_ASAN: "-g -O1 -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra"
+  LDFLAGS_ASAN: -fsanitize=address
+
+tasks:
+  default:
+    cmds:
+      - task: test_all
+
+  env:build:
+    desc: "Docker環境のイメージをビルド (ホストPCから実行)"
+    cmds:
+      - docker build -t kagayaki-nfa-env .
+
+  env:start:
+    desc: "Docker環境に入って開発を開始する (ホストPCから実行)"
+    cmds:
+      - docker run --rm -it --name kagayaki-nfa-container --gpus all -v "$(pwd)":/app kagayaki-nfa-env bash
+
+  env:stop:
+    desc: "起動中のコンテナを明示的に停止・破棄する (ホストPCから実行)"
+    cmds:
+      - docker stop kagayaki-nfa-container || true
+
+  test_utils:
+    desc: "ユーティリティのテスト (CPU & GPU)"
+    cmds:
+      - echo "======================================"
+      - echo " [1/2] Compiling & Running CPU Utils Test"
+      - echo "======================================"
+      - "{{.CC}} {{.INC}} {{.CFLAGS}} src/common/utils.c tests/test_utils.c -o test_utils_cpu.out"
+      - ./test_utils_cpu.out
+      - echo ""
+      - echo "======================================"
+      - echo " [2/2] Compiling & Running GPU Utils Test"
+      - echo "======================================"
+      - "{{.CC}} {{.INC}} {{.CFLAGS}} -DGPU_RUN src/common/utils.c tests/test_utils.c -o test_utils_gpu.out"
+      - ./test_utils_gpu.out
+      - echo ""
+
+  test_unit:
+    desc: "NFAエンジンの単体テスト"
+    cmds:
+      - echo "======================================"
+      - echo " Compiling & Running Unit Tests for NFA"
+      - echo "======================================"
+      - "{{.CC}} {{.INC}} {{.CFLAGS}} src/cpu/nfa_cpu.c tests/test_unit_nfa.c -o test_unit.out"
+      - ./test_unit.out
+      - echo ""
+
+  test_all:
+    desc: "すべてのテストを一括実行"
+    cmds:
+      - task: test_utils
+      - task: test_unit
+      - echo "All tests completed successfully!"
+
+  bench_cpu:
+    desc: "CPU ベンチマーク実行 (ASanつき)"
+    cmds:
+      - echo "Compiling Benchmarks (CPU with ASan)..."
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c src/cpu/nfa_cpu.c -o nfa_cpu.o"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c src/common/utils.c -o utils.o"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c app/run_benchmark.c -o run_benchmark.o"
+      - echo "Linking..."
+      - "{{.CC}} {{.LDFLAGS_ASAN}} nfa_cpu.o utils.o run_benchmark.o -o run_benchmark.asan"
+      - echo "Running Benchmark (CPU)..."
+      - ./run_benchmark.asan
+
+  bench_gpu:
+    desc: "GPU ベンチマーク実行"
+    cmds:
+      - echo "Compiling Benchmarks (GPU)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 {{.INC}} -c src/gpu/nfa_gpu.cu -o nfa_gpu.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/utils.c -o utils_gpu.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu.o"
+      - echo "Linking..."
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu.o utils_gpu.o run_benchmark_gpu.o -o run_benchmark_gpu.out"
+      - echo "Running Benchmark (GPU)..."
+      - ./run_benchmark_gpu.out
+
+  clean:
+    desc: "ビルドで発生した中間ファイルを消去"
+    cmds:
+      - echo "Cleaning up generated files..."
+      - rm -f *.o *.out *.asan
+      - echo "Clean completed."
