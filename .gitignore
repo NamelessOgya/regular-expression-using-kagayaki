@@ -12,3 +12,7 @@ run.sh
 chokosen-loveti.*
 *.out
 *.csv
+
+# C/C++ build artifacts
+*.o
+*.asan

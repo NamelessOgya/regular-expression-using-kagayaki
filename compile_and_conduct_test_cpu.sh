@@ -6,15 +6,18 @@ INC="-I./include"
 CFLAGS="-g -O1 -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra"
 LDFLAGS="-fsanitize=address"
 
-# 1) ライブラリ部をオブジェクト化
-gcc $INC $CFLAGS -c sandbox/nfa.c -o nfa.o
+echo "Compiling nfa_cpu.c..."
+gcc $INC $CFLAGS -c src/cpu/nfa_cpu.c -o nfa_cpu.o
 
-# 2) テストプログラムをオブジェクト化
-gcc $INC $CFLAGS -c src/test_nfa.c -o test_nfa.o
+echo "Compiling utils.c..."
+gcc $INC $CFLAGS -c src/common/utils.c -o utils.o
 
-# 3) リンクして実行ファイル生成
-gcc $LDFLAGS nfa.o test_nfa.o -o test_nfa.asan
+echo "Compiling run_benchmark.c..."
+gcc $INC $CFLAGS -c app/run_benchmark.c -o run_benchmark.o
 
-# 4) 実行
-chmod +x test_nfa.asan
-./test_nfa.asan
+echo "Linking..."
+gcc $LDFLAGS nfa_cpu.o utils.o run_benchmark.o -o run_benchmark.asan
+
+echo "Running Benchmark..."
+chmod +x run_benchmark.asan
+./run_benchmark.asan
