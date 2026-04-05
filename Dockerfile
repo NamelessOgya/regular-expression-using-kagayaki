@@ -1,12 +1,13 @@
-# ベースとなるOSはubuntu 20.04を選択
-FROM ubuntu:20.04
+# ベースとなるOSは CUDA 環境入りの Ubuntu を選択
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 
 # パッケージの一覧更新
 RUN apt-get update
 
 # タイムゾーンの設定
-RUN apt install -y tzdata
 ENV TZ=Asia/Tokyo
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 開発環境のシステムインストール
 RUN apt install -y wget \
@@ -14,3 +15,6 @@ RUN apt install -y wget \
   cmake \
   git \
   clang-format
+
+# ログイン時やコマンド実行時に自動で /app ディレクトリに移動する
+WORKDIR /app
