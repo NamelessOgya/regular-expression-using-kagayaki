@@ -155,7 +155,10 @@ void test_split_csv_static() {
     char line3[] = "1234567,abcdefghi";
     char short_regex[5]; // 4文字 + \0 が限界
     char short_target[5];
+
+    printf("  ( Info: ↓これはバッドケースのテストなので、エラーが出ていれば正常です )\n");
     size_t count3 = split_csv_static(line3, short_regex, short_target, sizeof(short_regex));
+    
     // 切り詰めは行わず、(size_t)-1 を返してエラー状態になっているかを確認
     assert(count3 == (size_t)-1);
 

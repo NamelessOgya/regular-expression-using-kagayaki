@@ -16,9 +16,7 @@
  */
 char line[MAX_LINE_LENGTH];
 char regex[MAX_LINE_LENGTH] = "";
-char target[MAX_LINE_LENGTH]; //正規表現マッチの検索対象文字列
-char target_list[MAX_SENTENCE_LENGTH][MAX_LINE_LENGTH]; //検索対象を\nで分割し、リストにしたもの。
-char result[MAX_RESULT_LENGTH];
+char target[MAX_LINE_LENGTH]; //正規表現マッチの長大な検索対象文字列
 
 int main() {
     FILE *file = fopen("./data/test_cases.csv", "r");
@@ -53,37 +51,29 @@ int main() {
         }
         remove_trailing_newline(target);
         printf("regex: %s\n", regex);
-        printf("target: %s\n", target);
-
-        size_t n = split_str_to_array(target, target_list);
-        if (n == (size_t)-1) {
-            fprintf(stderr, "[Fatal Error] Benchmark aborted: Failure to split string.\n");
-            exit(EXIT_FAILURE);
-        }
-
-        printf("n: %zu\n", n);
-
         case_start = now_sec();
 
-        // ここからNFA実行
+        // ここからNFA実行 (コンパイル含む)
         NFA *nfa = nfa_compile(regex);
-        size_t hit_idx[MAX_SENTENCE_LENGTH];
-        size_t k = nfa_grep_idx_arr(nfa, target_list, n, hit_idx);
+        int hit = 0;
+        if (nfa) {
+            hit = nfa_search(nfa, target);
+        }
 
         double case_time = (double)(now_sec() - case_start);
         // ここでNFA完了
 
         printf("Query: %s\n", regex);
         printf("Target: %s\n", target);
-        printf("Matched: %zu\n", k);
+        printf("Matched: %s\n", hit ? "Yes" : "No");
         printf("Execution Time: %.6f sec\n", case_time);
         printf("------------------------\n");
 
-        if (join_matches(result, sizeof(result), target_list, hit_idx, k) == -1) {
-            fprintf(stderr, "[Fatal Error] Benchmark aborted: Failure to join matches.\n");
-            exit(EXIT_FAILURE);
+        fprintf(csv_out, "\"%s\",\"%s\",\"%d\",%.6f\n", regex, target, hit, case_time);
+        
+        if (nfa) {
+            nfa_free(nfa);
         }
-        fprintf(csv_out, "\"%s\",\"%s\",\"%s\",%.6f\n", regex, target, result, case_time);
 
         total_time += case_time;
     }

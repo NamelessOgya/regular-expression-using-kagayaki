@@ -20,125 +20,7 @@
 
  
  
- /*
-  * Convert infix regexp re to postfix notation.
-  * Insert . as explicit concatenation operator.
-  * Cheesy parser, return static buffer.
-  */
-char*
-re2post(char *re)
-{
-   /*
-       正規表現を「後置表現（逆ポーランド記法）」に変換する。
-       
-       後置表現...演算子をオペランドの後ろに記載する記法
-       後置表現で実装することで、一文字読み込んでスタック操作の流れのみで実装が可能になり便利。
-   */
-    int num_alt = 0;
-    int num_atom = 0; //今開いているカッコレベルでまだ連結演算子.を出力していないatomの数
-    static char postfix_buffer[8000];
-    char *dest = postfix_buffer;
-    
-    struct {
-        int num_alt;
-        int num_atom;
-    } parentheses[100];
-    
-    // 現在のカッコの深さを指すポインタ
-    int paren_index = 0;
-    
-    if (strlen(re) >= sizeof(postfix_buffer) / 2) {
-        return NULL;
-    }
-    
-    for (char *current_char = re; *current_char != '\0'; current_char++) {
-        switch (*current_char) {
-        case '(':
-            if (num_atom > 1) {
-                num_atom--;
-                *dest = '#';
-                dest++;
-            }
-            if (paren_index >= 100) {
-                return NULL;
-            }
-            parentheses[paren_index].num_alt = num_alt;
-            parentheses[paren_index].num_atom = num_atom;
-            paren_index++;
-            num_alt = 0;
-            num_atom = 0;
-            break;
-            
-        case '|':
-            if (num_atom == 0) {
-                return NULL;
-            }
-            while (num_atom > 1) {
-                num_atom--;
-                *dest = '#';
-                dest++;
-            }
-            num_atom = 0; // 選択肢の区切りなので、atom数をリセット！
-            num_alt++;
-            break;
-            
-        case ')':
-            if (paren_index == 0 || num_atom == 0) {
-                return NULL;
-            }
-            while (num_atom > 1) {
-                num_atom--;
-                *dest = '#';
-                dest++;
-            }
-            for (; num_alt > 0; num_alt--) {
-                *dest = '|';
-                dest++;
-            }
-            paren_index--;
-            num_alt = parentheses[paren_index].num_alt;
-            num_atom = parentheses[paren_index].num_atom;
-            num_atom++;
-            break;
-            
-        case '*':
-        case '+':
-        case '?':
-            if (num_atom == 0) {
-                return NULL;
-            }
-            *dest = *current_char;
-            dest++;
-            break;
-            
-        default:
-            if (num_atom > 1) {
-                num_atom--;
-                *dest = '#';
-                dest++;
-            }
-            *dest = *current_char;
-            dest++;
-            num_atom++;
-            break;
-        }
-    }
-    if (paren_index != 0) {
-        return NULL;
-    }
-    while (num_atom > 1) {
-        num_atom--;
-        *dest = '#';
-        dest++;
-    }
-    for (; num_alt > 0; num_alt--) {
-        *dest = '|';
-        dest++;
-    }
-    *dest = '\0';
-    return postfix_buffer;
-}
- 
+
  /*
   * Represents an NFA state plus zero or one or two arrows exiting.
   * if c == Match, no arrows out; matching state.
@@ -253,10 +135,17 @@ State matchstate = {
      return oldl1;
  }
  
- /*
-  * Convert postfix regular expression to NFA.
-  * Return start state.
-  */
+/**
+ * 後置表現の正規表現文字列から、NFA（非決定性有限オートマトン）のグラフを構成する処理。
+ * 
+ * [担当処理]
+ * `re2post` で作成された後置表現を先頭から順に読み込み、スタックを用いて
+ * Thompsonのアルゴリズムに基づいた状態(State)ノード群をメモリ上に確保・連結していきます。
+ * 
+ * [想定I/O]
+ * - input:  後置表現文字列 postfix="ab#"
+ * - output: 構築されたNFAの先頭状態 (State *) へのポインタ
+ */
  State
  *post2nfa(char *postfix)
  {
@@ -422,6 +311,18 @@ struct NFA {
     List    l1, l2;  /* 再利用するリスト領域 */
 };
 
+/**
+ * NFAを用いて、入力文字列がパターンの「最初から最後まで完全に一致」するか判定する処理。
+ * 
+ * [担当処理]
+ * 構築されたNFAを先頭状態からスタートし、渡された文字列(`text`)を1文字ずつ消費させながら
+ * 全ての状態遷移をシミュレーションします。文字列を最後まで読み切った時点でMatch状態に
+ * 到達していれば真を返します。
+ * 
+ * [想定I/O]
+ * - input:  コンパイル済みNFA構造体 nfa, 検索対象テキスト text
+ * - output: 完全にマッチすれば 1 (True)、しなければ 0 (False)
+ */
 int nfa_test(const NFA *nfa, const char *text)
 {
     /* NFA が持つ２つの List 領域を参照 */
@@ -441,14 +342,20 @@ int nfa_test(const NFA *nfa, const char *text)
     return ismatch(clist);
 }
 
-/* --- compile --------------------------------- */
+/**
+ * 正規表現からNFA（実行用構造体）を生成・メモリ確保するメインAPI。
+ * 
+ * [担当処理]
+ * ユーザーが指定した正規表現文字列を受け取り、内部で `re2post` と `post2nfa` を呼び出して
+ * 状態遷移グラフを作成します。生成したグラフや後で使うメモリ領域を `NFA` 構造体に
+ * 格納して返却します。
+ * 
+ * [想定I/O]
+ * - input:  正規表現文字列 regex="a(b|c)*"
+ * - output: 動的確保された NFA構造体 へのポインタ（利用後は nfa_free が必要）
+ */
 NFA *nfa_compile(const char *regex)
 {
-    /*
-        正規表現をコンパイルして NFA を生成する。
-        検索の都度作るのは効率が悪いので一度作って再利用。
-        生成された NFA は、マッチングのために使用される。
-    */
     char  *post = re2post((char *)regex);
     if (!post) return NULL;
 
@@ -468,44 +375,65 @@ NFA *nfa_compile(const char *regex)
     return nfa;
 }
 
-// /* --- grep (複数まとめて) ---------------------- */
-// size_t nfa_grep_idx(const NFA            *nfa,
-//                     const char *const    *list,
-//                     size_t                n,
-//                     size_t               *out_idx)
-// {
-//     if (!nfa || !list) return 0;
-
-//     size_t hit = 0;
-//     for (size_t i = 0; i < n; ++i) {
-//         if (nfa_test(nfa, list[i])) {
-//             if (out_idx) out_idx[hit] = i;
-//             ++hit;
-//         }
-//     }
-//     return hit;
-// }
-
-size_t nfa_grep_idx_arr(const NFA *nfa,
-                        const char list[][MAX_LINE_LENGTH],
-                        size_t     n,
-                        size_t    *out_idx)
+/**
+ * 長大なテキストの中から、正規表現に部分一致（Substring Match）する箇所が存在するか探索するAPI。
+ * 
+ * [担当処理]
+ * テキストの先頭（0文字目）から順にマッチングを試み、失敗したら1文字ずらして再試行します。
+ * NFAがMatch状態に到達した瞬間に探索対象を発見したとみなし、即座に終了して真を返します。
+ * 
+ * [想定I/O]
+ * - input:  コンパイル済みNFA構造体 nfa, 巨大な検索対象テキスト text
+ * - output: パターンが見つかれば 1 (True)、全く見つからなければ 0 (False)
+ */
+int nfa_search(const NFA *nfa, const char *text)
 {
-    if (!nfa || !list) return 0;
+    if (!nfa || !text) return 0;
 
-    size_t hit = 0;
-    for (size_t i = 0; i < n; ++i) {
-        if (list[i][0] == '\0')        /* 空行ならスキップしたい場合 */
-            continue;
-        if (nfa_test(nfa, list[i])) {
-            if (out_idx) out_idx[hit] = i;
-            ++hit;
+    /* const を外す (既存の実装の流儀に従う) */
+    List *l1_ptr = (List*)&nfa->l1;
+    List *l2_ptr = (List*)&nfa->l2;
+
+    /* すべての文字の開始位置からマッチングを試みる */
+    for (int i = 0; text[i] != '\0'; ++i) {
+        List *clist = startlist(nfa->start, l1_ptr);
+        List *nlist = l2_ptr;
+
+        /* 空文字で即マッチ可能（^など）なケースへの対応 */
+        if (ismatch(clist)) {
+            return 1;
+        }
+
+        for (const unsigned char *p = (const unsigned char*)(text + i); *p; ++p) {
+            step(clist, *p, nlist);
+            List *tmp = clist;
+            clist = nlist;
+            nlist = tmp;
+
+            /* 途中でマッチ状態に到達したらそこで探索成功として返す */
+            if (ismatch(clist)) {
+                return 1;
+            }
+            /* 可能性が完全に途絶えたら内部ループを早抜け */
+            if (clist->n == 0) {
+                break;
+            }
         }
     }
-    return hit;
+    return 0;
 }
 
-/* --- free ------------------------------------ */
+/**
+ * nfa_compile で確保された NFA 構造体や内部状態ノードを一括で破棄する処理。
+ * 
+ * [担当処理]
+ * NFA内に紐づくプールされたState群、やリスト領域、NFA本体を `free` して
+ * メモリリークを防止します。
+ * 
+ * [想定I/O]
+ * - input:  破棄対象のNFA構造体 nfa
+ * - output: なし
+ */
 void nfa_free(NFA *nfa)
 {
     if (!nfa) return;
