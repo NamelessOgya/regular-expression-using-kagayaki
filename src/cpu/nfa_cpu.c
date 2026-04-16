@@ -1,15 +1,14 @@
 /*
- * Regular expression implementation.
- * Supports only ( | ) * + ?.  No escapes.
- * Compiles to NFA and then simulates NFA
- * using Thompson's algorithm.
+ * 正規表現の実装。
+ * ( | ) * + ? のみをサポート。エスケープは非対応。
+ * NFAにコンパイルし、Thompsonのアルゴリズムを用いてNFAをシミュレートする。
  *
- * See also http://swtch.com/~rsc/regexp/ and
- * Thompson, Ken.  Regular Expression Search Algorithm,
- * Communications of the ACM 11(6) (June 1968), pp. 419-422.
+ * 参考: http://swtch.com/~rsc/regexp/ 
+ *       Thompson, Ken.  Regular Expression Search Algorithm,
+ *       Communications of the ACM 11(6) (June 1968), pp. 419-422.
  * 
  * Copyright (c) 2007 Russ Cox.
- * Can be distributed under the MIT license, see bottom of file.
+ * MITライセンスのもとで配布可能。詳細はファイルの末尾を参照。
  */
  #include <stdio.h>
  #include <stdlib.h>
@@ -22,10 +21,10 @@
  
 
  /*
-  * Represents an NFA state plus zero or one or two arrows exiting.
-  * if c == Match, no arrows out; matching state.
-  * If c == Split, unlabeled arrows to out and out1 (if != NULL).
-  * If c < 256, labeled arrow with character c to out.
+  * NFAの1つの状態と、そこから出る0個、1個、または2個の矢印（遷移）を表現する。
+  * c == Match の場合、外に出る矢印はなく、マッチ状態（終端状態）となる。
+  * c == Split の場合、ラベルのない矢印が out と out1 に向かう（out1 が NULL でない場合）。
+  * c < 256 の場合、文字 c がラベル付けされた矢印が out に向かう。
   */
  enum
  {
@@ -42,7 +41,7 @@
      State *out1; // Splitの場合のもう一方のポインタ
      int lastlist;
  };
-/* matching state: 全フィールドを明示的に初期化 */
+/* マッチ状態: 全フィールドを明示的に初期化 */
 // matchstateは、NFAの終端状態を表す。
 State matchstate = {
     .c        = Match,
@@ -72,20 +71,19 @@ State matchstate = {
  }
  
  /*
-  * A partially built NFA without the matching state filled in.
-  * Frag.start points at the start state.
-  * Frag.out is a list of places that need to be set to the
-  * next state for this fragment.
+  * マッチ状態が設定される前の、部分的に構築されたNFA。
+  * Frag.start は開始状態へのポインタ。
+  * Frag.out は、このフラグメントの次の状態に設定する必要がある場所（未設定のポインタ）のリスト。
   */
  typedef struct Frag Frag;
  typedef union Ptrlist Ptrlist;
- struct Frag // 断片グラフの入り口と出口を管理
+ struct Frag // 断片グラフの入り口と出口を管理する。
  {
      State *start; // NFAの開始状態
      Ptrlist *out; //出口のポインタのリスト Pointer List（ポインタのリスト）
  };
  
- /* Initialize Frag struct. */
+ /* Frag構造体を初期化する。 */
  Frag
  frag(State *start, Ptrlist *out)
  {
@@ -94,9 +92,8 @@ State matchstate = {
  }
  
  /*
-  * Since the out pointers in the list are always 
-  * uninitialized, we use the pointers themselves
-  * as storage for the Ptrlists.
+  * リスト内の out ポインタは常に未初期化であるため、
+  * それらのポインタ自体を Ptrlist のストレージとして利用する。
   */
  union Ptrlist
  {
@@ -104,7 +101,7 @@ State matchstate = {
      State *s;
  };
  
- /* Create singleton list containing just outp. */
+ /* outpのみを含む要素が一つのみのリストを作成する */
  Ptrlist*
  list1(State **outp)
  {
@@ -115,7 +112,7 @@ State matchstate = {
      return l;
  }
  
- /* Patch the list of states at out to point to start. */
+ /* 状態のリスト out が start を指すようにパッチを当てる（つなぐ）。 */
  void
  patch(Ptrlist *l, State *s)
  {
@@ -127,7 +124,7 @@ State matchstate = {
      }
  }
  
- /* Join the two lists l1 and l2, returning the combination. */
+ /* l1 と l2 の2つのリストを結合し、結合したリストを返す。 */
  Ptrlist*
  append(Ptrlist *l1, Ptrlist *l2)
  {
@@ -174,30 +171,30 @@ State matchstate = {
              s = state(Any, NULL, NULL);
              push(frag(s, list1(&s->out)));
              break;
-         case '#':	/* catenate */
+         case '#':	/* 結合 (catenate) */
              e2 = pop();
              e1 = pop();
              patch(e1.out, e2.start);
              push(frag(e1.start, e2.out));
              break;
-         case '|':	/* alternate */
+         case '|':	/* 選択 (alternate) */
              e2 = pop();
              e1 = pop();
              s = state(Split, e1.start, e2.start);
              push(frag(s, append(e1.out, e2.out)));
              break;
-         case '?':	/* zero or one */
+         case '?':	/* 0回または1回 (zero or one) */
              e = pop();
              s = state(Split, e.start, NULL);
              push(frag(s, append(e.out, list1(&s->out1))));
              break;
-         case '*':	/* zero or more */
+         case '*':	/* 0回以上の繰り返し (zero or more) */
              e = pop();
              s = state(Split, e.start, NULL);
              patch(e.out, s);
              push(frag(s, list1(&s->out1)));
              break;
-         case '+':	/* one or more */
+         case '+':	/* 1回以上の繰り返し (one or more) */
              e = pop();
              s = state(Split, e.start, NULL);
              patch(e.out, s);
@@ -232,7 +229,7 @@ State matchstate = {
  void addstate(List*, State*);
  void step(List*, int, List*);
  
- /* Compute initial state list */
+ /* 初期状態のリストを計算する */
  List*
  startlist(State *start, List *l)
  {
@@ -242,7 +239,7 @@ State matchstate = {
      return l;
  }
  
- /* Check whether state list contains a match. */
+ /* 状態リストにマッチ状態が含まれているかを確認する。 */
  int
  ismatch(List *l)
  {
@@ -254,7 +251,7 @@ State matchstate = {
      return 0;
  }
  
- /* Add s to l, following unlabeled arrows. */
+ /* ラベルのない矢印（Splitなど）をたどりながら、状態 s をリスト l に追加する。 */
  void
  addstate(List *l, State *s)
  {
@@ -262,7 +259,7 @@ State matchstate = {
          return;
      s->lastlist = listid;
      if(s->c == Split){
-         /* follow unlabeled arrows */
+         /* ラベルのない矢印をたどる */
          addstate(l, s->out);
          addstate(l, s->out1);
          return;
@@ -271,9 +268,8 @@ State matchstate = {
  }
  
  /*
-  * Step the NFA from the states in clist
-  * past the character c,
-  * to create next NFA state set nlist.
+  * 現在の状態リスト clist から文字 c の遷移を1ステップ進め、
+  * 次のNFA状態の集合 nlist を作成する。
   */
  void
  step(List *clist, int c, List *nlist)
@@ -290,7 +286,7 @@ State matchstate = {
      }
  }
  
- /* Run NFA to determine whether it matches s. */
+ /* NFAを実行し、文字列 s にマッチするか判定する。 */
  int
  match(State *start, char *s)
  {
@@ -302,7 +298,7 @@ State matchstate = {
      for(; *s; s++){
          c = *s & 0xFF;
          step(clist, c, nlist);
-         t = clist; clist = nlist; nlist = t;	/* swap clist, nlist */
+         t = clist; clist = nlist; nlist = t;	/* clist と nlist を交換 */
      }
      
      return ismatch(clist);
@@ -311,7 +307,7 @@ State matchstate = {
 /* --- 追加: NFA ラッパ構造体 ------------------- */
 struct NFA {
     State  *start;   /* 受理オートマトン先頭 */
-    State **state_pool; /* malloc した State* 配列 for free */
+    State **state_pool; /* malloc した State* 配列 (free用) */
     size_t  nstate;
     List    l1, l2;  /* 再利用するリスト領域 */
 };
@@ -334,7 +330,7 @@ int nfa_test(const NFA *nfa, const char *text)
     List *clist = startlist(nfa->start, &nfa->l1);
     List *nlist = &nfa->l2;
 
-    /* each char */
+    /* 各文字についてループ */
     for (const unsigned char *p = (const unsigned char*)text; *p; ++p) {
         /* 今の状態集合 clist から文字 *p を遷移して nlist へ */
         step(clist, *p, nlist);
@@ -451,25 +447,17 @@ void nfa_free(NFA *nfa)
 }
  
  /*
-  * Permission is hereby granted, free of charge, to any person
-  * obtaining a copy of this software and associated
-  * documentation files (the "Software"), to deal in the
-  * Software without restriction, including without limitation
-  * the rights to use, copy, modify, merge, publish, distribute,
-  * sublicense, and/or sell copies of the Software, and to
-  * permit persons to whom the Software is furnished to do so,
-  * subject to the following conditions:
+  * 【MITライセンス 日本語訳】
+  * 以下に定める条件に従い、本ソフトウェアおよび関連文書のファイル（以下「ソフトウェア」）の複製を
+  * 取得するすべての人に対し、ソフトウェアを無制限に扱うことを無償で許可します。
+  * これには、ソフトウェアの複製を使用、複写、変更、結合、掲載、頒布、サブライセンス、
+  * および/または販売する権利、およびソフトウェアを提供する相手に同じことを許可する権利も含まれます。
   * 
-  * The above copyright notice and this permission notice shall
-  * be included in all copies or substantial portions of the
-  * Software.
+  * 上記の著作権表示および本許諾表示を、ソフトウェアのすべての複製または重要な部分に記載するものとします。
   * 
-  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
-  * KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-  * WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-  * PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS
-  * OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+  * ソフトウェアは「現状のまま」提供され、明示であるか暗黙であるかを問わず、何らの保証もありません。
+  * ここでいう保証とは、商品性、特定の目的への適合性、および権利非侵害についての保証も含みますが、
+  * それに限定されるものではありません。作者または著作権者は、契約行為、不法行為、またはそれ以外であろうと、
+  * ソフトウェアに起因または関連し、あるいはソフトウェアの使用またはその他の扱いによって生じる
+  * 一切の請求、損害、その他の義務について何らの責任も負わないものとします。
   */
