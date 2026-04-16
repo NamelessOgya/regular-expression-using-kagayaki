@@ -29,6 +29,7 @@
   */
  enum
  {
+    //通常の文字(0-255の範囲で表現)に加えて3つの文字を定義している。
      Match = 256,
      Split = 257,
      Any   = 258,    /* 追加：ワイルドカード */
@@ -37,11 +38,12 @@
  struct State
  {
      int c;
-     State *out;
-     State *out1;
+     State *out; // 次の状態へのポインタ
+     State *out1; // Splitの場合のもう一方のポインタ
      int lastlist;
  };
 /* matching state: 全フィールドを明示的に初期化 */
+// matchstateは、NFAの終端状態を表す。
 State matchstate = {
     .c        = Match,
     .out      = NULL,
@@ -51,19 +53,22 @@ State matchstate = {
 
  int nstate;
  
- /* Allocate and initialize State */
+// ステートを増やす関数  
+// 
  State*
  state(int c, State *out, State *out1)
  {
-     State *s;
+     State *s; // ステートのポインタを入れる変数を準備  
      
-     nstate++;
-     s = malloc(sizeof *s);
-     s->lastlist = 0;
-     s->c = c;
-     s->out = out;
-     s->out1 = out1;
-     return s;
+     nstate++; // ステート数を増やす。
+     s = malloc(sizeof *s); // ステート用のメモリを確保
+
+     // ->でポインタの指し示す構造体に代入できる。
+     s->lastlist = 0; // 
+     s->c = c; // ステートに文字をセット
+     s->out = out; // 次の状態へのポインタをセット
+     s->out1 = out1; // Splitの場合のもう一方のポインタをセット
+     return s; // ステートを返す
  }
  
  /*
@@ -74,10 +79,10 @@ State matchstate = {
   */
  typedef struct Frag Frag;
  typedef union Ptrlist Ptrlist;
- struct Frag
+ struct Frag // 断片グラフの入り口と出口を管理
  {
-     State *start;
-     Ptrlist *out;
+     State *start; // NFAの開始状態
+     Ptrlist *out; //出口のポインタのリスト Pointer List（ポインタのリスト）
  };
  
  /* Initialize Frag struct. */
