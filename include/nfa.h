@@ -17,10 +17,10 @@ enum
 typedef struct State State;
 struct State
 {
-    int c;
-    State *out;
-    State *out1;
-    int lastlist;
+    int c; // 遷移する文字。Match, Split, Anyは特殊な文字として扱う。
+    State *out; // 次にどのStateに行くか。Stateのポインタが入る。
+    State *out1; // 分岐がある場合、もう一つのStateのポインタが入る。正規表現は2つの分岐で表現できるはずなので、out1まであれば十分。
+    int lastlist; // NFA探索時（実行時）に同じStateが重複してリストに登録されたり、無限ループに陥るのを防ぐための「訪問済マーカー（世代ID）」。
 };
 
 extern State matchstate;
