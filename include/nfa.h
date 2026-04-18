@@ -6,6 +6,28 @@
 
 typedef struct NFA NFA;          /* 前方宣言 (実体は nfa.c) */
 
+/* -- NFA Graph Construction (CPU/GPU 共通) -- */
+enum
+{
+    Match = 256,
+    Split = 257,
+    Any   = 258,
+};
+
+typedef struct State State;
+struct State
+{
+    int c;
+    State *out;
+    State *out1;
+    int lastlist;
+};
+
+extern State matchstate;
+extern int nstate;
+
+State *post2nfa(char *postfix);
+
 /* 既存 API */
 NFA   *nfa_compile(const char *regex);
 int    nfa_test(const NFA *nfa, const char *text);
