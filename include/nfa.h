@@ -3,25 +3,44 @@
 #define NFA_H_
 
 #include "config.h"
-#include <stddef.h>   /* size_t 用 */
+#include <stddef.h>   /* サイズを表す size_t という型を使うためのおまじないです */
 
-typedef struct NFA NFA;          /* 前方宣言 (実体は nfa.c) */
+// NFA (非決定性有限オートマトン) という、正規表現を処理するための「設計図」のようなものを表すデータ型です。
+// 中身の複雑な仕組みは別の場所(nfa.c)で定義されています。
+typedef struct NFA NFA;
 
-/* 既存 API */
+// ---------------------------------------------------------
+// 基本的な機能（既存の機能）
+// ---------------------------------------------------------
+
+// 1. 正規表現のルールを読み込んで、NFA（設計図）を作り出します。
 NFA   *nfa_compile(const char *regex);
+
+// 2. テキストが正規表現にマッチする（一致する）かどうかをテストします。
 int    nfa_test(const NFA *nfa, const char *text);
+
+// 3. 使い終わったNFA（設計図）をゴミ箱に捨てて、メモリを片付けます。
 void   nfa_free(NFA *nfa);
 
-/* ← 追加したいプロトタイプ */
-size_t nfa_grep_idx(const NFA         *nfa,
-                    const char *const *list,
-                    size_t             n,
-                    size_t            *out_idx);
 
+// ---------------------------------------------------------
+// リストから検索する機能
+// ---------------------------------------------------------
+
+// 文字列のリストから、正規表現に一致するものを探し出し、ヒットした番号（インデックス）を out_idx に保存します。
+size_t nfa_grep_idx(
+        const NFA         *nfa,      // 検索に使うNFA（設計図）
+        const char *const *list,     // 検索対象の文字列のリスト
+        size_t             n,        // リストの中にある文字列の数
+        size_t            *out_idx   // ヒットした番号を保存する配列
+);
+
+// 上の関数と似ていますが、固定サイズの配列（2次元配列）を直接受け取るバージョンです。
 size_t nfa_grep_idx_arr(
-        const NFA *nfa,
-        const char list[][MAX_LINE_LENGTH],
-        size_t     n,
-        size_t    *out_idx);
+        const NFA *nfa,                            // 検索に使うNFA
+        const char list[][MAX_LINE_LENGTH],        // 検索対象の2次元配列
+        size_t     n,                              // リストの要素数
+        size_t    *out_idx                         // ヒットした番号を保存する配列
+);
 
 #endif /* NFA_H_ */
