@@ -16,3 +16,4 @@ chokosen-loveti.*
 # C/C++ build artifacts
 *.o
 *.asan
+data/*
