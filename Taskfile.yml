@@ -3,7 +3,7 @@ version: '3'
 vars:
   CC: gcc
   NVCC: nvcc
-  INC: -I./include -I./src/gpu
+  INC: -I./include -I./src/gpu -I./src/gpu/common -I./src/gpu/line_parallel -I./src/gpu/chunk_parallel
   CFLAGS: "-Wall -Wextra -g"
   CFLAGS_OPT: -O3
   CFLAGS_ASAN: "-g -O1 -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra"
@@ -55,13 +55,14 @@ tasks:
       - echo "======================================"
       - echo " [2/2] Compiling & Running GPU Utils Test"
       - echo "======================================"
-      - nvcc -O3 -arch=sm_80 -DGPU_RUN -I./include -I./src/gpu -c src/gpu/nfa_gpu.cu -o nfa_gpu_test.o
-      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/common/utils.c -o utils_test.o
-      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/cpu/nfa_cpu.c -o nfa_cpu_test.o
-      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/common/re2post.c -o re2post_test.o
-      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/common/post2nfa.c -o post2nfa_test.o
-      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c tests/test_utils.c -o test_utils_test.o
-      - nvcc -O3 -arch=sm_80 nfa_gpu_test.o utils_test.o nfa_cpu_test.o re2post_test.o post2nfa_test.o test_utils_test.o -o test_utils_gpu.out
+      - nvcc -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/line_parallel/nfa_gpu_line.cu -o nfa_gpu_line_test.o
+      - nvcc -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/common/utils.c -o utils_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/cpu/nfa_cpu.c -o nfa_cpu_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/common/re2post.c -o re2post_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/common/post2nfa.c -o post2nfa_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c tests/test_utils.c -o test_utils_test.o
+      - nvcc -O3 -arch=sm_80 nfa_gpu_line_test.o nfa_gpu_chunk_test.o utils_test.o nfa_cpu_test.o re2post_test.o post2nfa_test.o test_utils_test.o -o test_utils_gpu.out
       - ./test_utils_gpu.out
       - echo ""
 
@@ -107,19 +108,50 @@ tasks:
       - echo "Running Benchmark (CPU)..."
       - ./run_benchmark.asan
 
-  bench_gpu:
-    desc: "GPU ベンチマーク実行"
+  bench_gpu_line:
+    desc: "GPU 行並列ベンチマーク実行"
     cmds:
-      - echo "Compiling Benchmarks (GPU)..."
-      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/nfa_gpu.cu -o nfa_gpu.o"
-      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu.o"
-      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/utils.c -o utils_gpu.o"
-      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu.o"
-      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu.o"
-      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu.o"
+      - echo "Compiling Benchmarks (GPU Line)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_LINE_RUN {{.INC}} -c src/gpu/line_parallel/nfa_gpu_line.cu -o nfa_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/common/utils.c -o utils_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu_line.o"
       - echo "Linking..."
-      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu.o nfa_cpu_gpu.o utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu.o -o run_benchmark_gpu.out"
-      - echo "Running Benchmark (GPU)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu_line.o nfa_cpu_gpu_line.o utils_gpu_line.o re2post_gpu_line.o post2nfa_gpu_line.o run_benchmark_gpu_line.o -o run_benchmark_gpu_line.out"
+      - echo "Running Benchmark (GPU Line)..."
+      - ./run_benchmark_gpu_line.out
+
+  bench_gpu_chunk:
+    desc: "GPU チャンク並列ベンチマーク実行"
+    cmds:
+      - echo "Compiling Benchmarks (GPU Chunk)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_CHUNK_RUN {{.INC}} -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/common/utils.c -o utils_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu_chunk.o"
+      - echo "Linking..."
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu_chunk.o nfa_cpu_gpu_chunk.o utils_gpu_chunk.o re2post_gpu_chunk.o post2nfa_gpu_chunk.o run_benchmark_gpu_chunk.o -o run_benchmark_gpu_chunk.out"
+      - echo "Running Benchmark (GPU Chunk)..."
+      - ./run_benchmark_gpu_chunk.out
+
+  bench_gpu:
+    desc: "GPU 比較ベンチマーク実行"
+    cmds:
+      - echo "Compiling Benchmarks (GPU Comparison)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/line_parallel/nfa_gpu_line.cu -o nfa_gpu_line_cmp.o"
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/utils.c -o utils_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu_cmp.o"
+      - echo "Linking..."
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu_line_cmp.o nfa_gpu_chunk_cmp.o nfa_cpu_gpu_cmp.o utils_gpu_cmp.o re2post_gpu_cmp.o post2nfa_gpu_cmp.o run_benchmark_gpu_cmp.o -o run_benchmark_gpu.out"
+      - echo "Running Benchmark (GPU Comparison)..."
       - ./run_benchmark_gpu.out
 
   dataset:enwik9:

@@ -228,10 +228,12 @@ SearchResult search_engine_execute(
     if (strcmp(strategy, "cpu_line_sequential") == 0) {
         return cpu_line_sequential(nfa, text, text_bytes);
     }
-#ifdef GPU_RUN
+#if defined(GPU_LINE_RUN) || defined(GPU_RUN)
     if (strcmp(strategy, "gpu_line_parallel") == 0) {
         return gpu_line_parallel(nfa, text, text_bytes);
     }
+#endif
+#if defined(GPU_CHUNK_RUN) || defined(GPU_RUN)
     if (strcmp(strategy, "gpu_chunk_parallel") == 0) {
         return gpu_chunk_parallel(nfa, text, text_bytes);
     }

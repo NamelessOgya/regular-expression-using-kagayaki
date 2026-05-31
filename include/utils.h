@@ -27,6 +27,9 @@ SearchResult create_search_result(void);
 void free_search_result(SearchResult *result);
 void add_match_item(SearchResult *result, int line_number, const char *content);
 
+SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
+SearchResult gpu_chunk_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
+
 SearchResult search_engine_execute(
     const char *strategy,
     struct NFA *nfa,

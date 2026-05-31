@@ -159,8 +159,20 @@ int main(int argc, char *argv[]) {
         SearchResult result;
         double case_time;
 
-#ifdef GPU_RUN
-        // GPU実行モード：両方の並列化アプローチを計測・比較します！
+#if defined(GPU_LINE_RUN)
+        // GPU 行並列実行モード
+        printf("  [GPU Line] Running Simple Line-Parallel Strategy...\n");
+        double start = now_sec();
+        result = search_engine_execute("gpu_line_parallel", nfa, target_subset, subset_bytes);
+        case_time = now_sec() - start;
+#elif defined(GPU_CHUNK_RUN)
+        // GPU チャンク並列実行モード
+        printf("  [GPU Chunk] Running Overlapping Chunk-Parallel Strategy...\n");
+        double start = now_sec();
+        result = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
+        case_time = now_sec() - start;
+#elif defined(GPU_RUN)
+        // GPU 比較モード（両方を同時実行）
         printf("  [GPU] Running Simple Line-Parallel Strategy...\n");
         double start1 = now_sec();
         result = search_engine_execute("gpu_line_parallel", nfa, target_subset, subset_bytes);
