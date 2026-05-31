@@ -35,13 +35,13 @@ tasks:
       - echo "======================================"
       - echo " [1/2] Compiling & Running CPU Utils Test"
       - echo "======================================"
-      - "{{.CC}} {{.INC}} {{.CFLAGS}} src/common/utils.c tests/test_utils.c -o test_utils_cpu.out"
+      - "{{.CC}} {{.INC}} {{.CFLAGS}} src/common/utils.c src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_utils.c -o test_utils_cpu.out"
       - ./test_utils_cpu.out
       - echo ""
       - echo "======================================"
       - echo " [2/2] Compiling & Running GPU Utils Test"
       - echo "======================================"
-      - "{{.CC}} {{.INC}} {{.CFLAGS}} -DGPU_RUN src/common/utils.c tests/test_utils.c -o test_utils_gpu.out"
+      - "{{.CC}} {{.INC}} {{.CFLAGS}} -DGPU_RUN src/common/utils.c src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_utils.c -o test_utils_gpu.out"
       - ./test_utils_gpu.out
       - echo ""
 
@@ -55,11 +55,22 @@ tasks:
       - ./test_unit.out
       - echo ""
 
+  test_search_engine:
+    desc: "検索エンジンの抽象化と行単位マッチングのテスト (CPU with ASan)"
+    cmds:
+      - echo "======================================"
+      - echo " Compiling & Running Search Engine Unit Tests"
+      - echo "======================================"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} src/common/utils.c src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_search_engine.c {{.LDFLAGS_ASAN}} -o test_search_engine.asan"
+      - ./test_search_engine.asan
+      - echo ""
+
   test_all:
     desc: "すべてのテストを一括実行"
     cmds:
       - task: test_utils
       - task: test_unit
+      - task: test_search_engine
       - echo "All tests completed successfully!"
 
   bench_cpu:

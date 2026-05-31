@@ -89,7 +89,7 @@ void test_write_csv_header() {
     assert(res != NULL); // 中身が空でないか確認
     
     // 5. 期待する出力と完全に一致するか確認
-    const char *expected = "正規表現,検索対象,マッチ結果,実行時間(秒)\n";
+    const char *expected = "正規表現,検索対象,マッチ行数,マッチ詳細(行番号と行テキスト),実行時間(秒)\n";
     assert(strcmp(buffer, expected) == 0);
     
     fclose(fr);

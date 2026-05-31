@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
 #include <unistd.h> 
 
 #include "config.h"
@@ -43,7 +42,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    
     // 一旦ファイル全体（またはバッファ一杯）を読み込むためのバッファ
     char *large_text_buffer = malloc(MAX_SENTENCE_LENGTH);
     if (!large_text_buffer) {
@@ -146,35 +144,93 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
         
-        // CSVの検索対象列は無視し、切り出した大量テキストのサブセットを対象にする
-        if (subset_bytes >= sizeof(target)) {
-            fprintf(stderr, "[Error] Subset size in bytes (%zu) exceeds target buffer size (%zu).\n", subset_bytes, sizeof(target));
-            exit(EXIT_FAILURE);
-        }
-        strcpy(target, target_subset);
-
         printf("regex: %s\n", regex);
         case_start = now_sec();
 
-        // ここからNFA実行 (コンパイル含む)
+        // NFAコンパイル
         NFA *nfa = nfa_compile(regex);
-        int hit = 0;
-        if (nfa) {
-            hit = nfa_search(nfa, target);
-        }
+        
+        // 統一検索エンジンを介して行単位検索を実行 (計測対象)
+        SearchResult result = search_engine_execute("cpu_line_sequential", nfa, target_subset, subset_bytes);
 
         double case_time = (double)(now_sec() - case_start);
-        // ここでNFA完了
+        // ここでNFA実行完了
 
+        // ===== 計測時間外での結果集約およびCSV書き出し (I/O分離) =====
+        char *csv_details = NULL;
+        if (result.count > 0) {
+            size_t details_capacity = 4096;
+            csv_details = malloc(details_capacity);
+            if (!csv_details) {
+                perror("Failed to allocate memory for CSV details");
+                exit(EXIT_FAILURE);
+            }
+            csv_details[0] = '\0';
+            size_t details_len = 0;
+            
+            for (size_t i = 0; i < result.count; i++) {
+                char temp_match[16384];
+                // "Line %d: " を最初に安全に書き込む
+                int header_len = snprintf(temp_match, sizeof(temp_match), "Line %d: ", result.items[i].line_number);
+                
+                // 行の中身にあるダブルクォートをエスケープ (" -> "") しながら安全にコピーする
+                int dest_idx = header_len;
+                const char *src = result.items[i].line_content;
+                while (*src != '\0' && dest_idx < (int)sizeof(temp_match) - 3) {
+                    if (*src == '"') {
+                        temp_match[dest_idx++] = '"';
+                        temp_match[dest_idx++] = '"';
+                    } else {
+                        temp_match[dest_idx++] = *src;
+                    }
+                    src++;
+                }
+                temp_match[dest_idx] = '\0';
+                
+                size_t temp_len = strlen(temp_match);
+                size_t needed = details_len + temp_len + (i > 0 ? 3 : 0) + 1;
+                
+                if (needed > details_capacity) {
+                    while (details_capacity < needed) {
+                        details_capacity *= 2;
+                    }
+                    char *new_details = realloc(csv_details, details_capacity);
+                    if (!new_details) {
+                        perror("realloc for CSV details failed");
+                        exit(EXIT_FAILURE);
+                    }
+                    csv_details = new_details;
+                }
+                
+                if (i > 0) {
+                    strcat(csv_details, " | ");
+                    details_len += 3;
+                }
+                strcat(csv_details, temp_match);
+                details_len += temp_len;
+            }
+        } else {
+            csv_details = strdup("No match");
+            if (!csv_details) {
+                perror("strdup for No match failed");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        // ターミナル出力 (クリーンな要約のみ)
         printf("Query: %s\n", regex);
         printf("Target (subset): [Length: %zu chars (%zu bytes)]\n", char_count, subset_bytes);
-        printf("Matched: %s\n", hit ? "Yes" : "No");
-        printf("Execution Time: %.6f sec\n", case_time);
+        printf("Matched Lines: %zu lines\n", result.count);
+        printf("Execution Time: %.6f sec (Pure CPU calculation)\n", case_time);
         printf("------------------------\n");
 
-        fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"%d\",%.6f\n", regex, char_count, hit, case_time);
+        // 1クエリにつき1行でCSVに出力
+        fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"%zu\",\"%s\",%.6f\n", 
+                regex, char_count, result.count, csv_details, case_time);
 
-        
+        // 不要になったメモリの解放
+        free(csv_details);
+        free_search_result(&result);
         if (nfa) {
             nfa_free(nfa);
         }

@@ -4,6 +4,7 @@
 #include <time.h>
 #include "config.h"
 #include "utils.h"
+#include "nfa.h"
 
 /**
  * 現在の JST (日本標準時) 時刻を取得するフォーマット関数。
@@ -73,7 +74,7 @@ void remove_trailing_newline(char *s) {
  * - output: ファイルに対して "正規表現,検索対象,マッチ結果,実行時間(秒)\n" が書き込まれる
  */
 void write_csv_header(FILE *file) {
-    fprintf(file, "正規表現,検索対象,マッチ結果,実行時間(秒)\n");
+    fprintf(file, "正規表現,検索対象,マッチ行数,マッチ詳細(行番号と行テキスト),実行時間(秒)\n");
 }
 
 /**
@@ -134,6 +135,97 @@ size_t split_csv_static(char *line, char *regex, char *target, size_t buflen) {
         tok = strtok(NULL, ",");
     }
     return n;        
+}
+
+SearchResult create_search_result(void) {
+    SearchResult result;
+    result.items = NULL;
+    result.count = 0;
+    result.capacity = 0;
+    return result;
+}
+
+void free_search_result(SearchResult *result) {
+    if (result->items) {
+        for (size_t i = 0; i < result->count; i++) {
+            free(result->items[i].line_content);
+        }
+        free(result->items);
+        result->items = NULL;
+    }
+    result->count = 0;
+    result->capacity = 0;
+}
+
+void add_match_item(SearchResult *result, int line_number, const char *content) {
+    if (result->count >= result->capacity) {
+        size_t new_capacity = result->capacity == 0 ? 4 : result->capacity * 2;
+        MatchItem *new_items = realloc(result->items, new_capacity * sizeof(MatchItem));
+        if (!new_items) {
+            perror("add_match_item realloc failed");
+            exit(EXIT_FAILURE);
+        }
+        result->items = new_items;
+        result->capacity = new_capacity;
+    }
+    result->items[result->count].line_number = line_number;
+    result->items[result->count].line_content = strdup(content);
+    if (!result->items[result->count].line_content) {
+        perror("add_match_item strdup failed");
+        exit(EXIT_FAILURE);
+    }
+    result->count++;
+}
+
+static SearchResult cpu_line_sequential(struct NFA *nfa, const char *text, size_t text_bytes) {
+    SearchResult result = create_search_result();
+    if (!text || text_bytes == 0) {
+        return result;
+    }
+
+    char *text_copy = malloc(text_bytes + 1);
+    if (!text_copy) {
+        perror("cpu_line_sequential malloc failed");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(text_copy, text, text_bytes);
+    text_copy[text_bytes] = '\0';
+
+    char *current_line = text_copy;
+    int line_number = 1;
+
+    while (current_line && *current_line != '\0') {
+        char *next_line = strchr(current_line, '\n');
+        if (next_line) {
+            *next_line = '\0';
+            next_line++;
+        }
+
+        // 各行に対して NFA 検索
+        if (nfa_search(nfa, current_line)) {
+            add_match_item(&result, line_number, current_line);
+        }
+
+        current_line = next_line;
+        line_number++;
+    }
+
+    free(text_copy);
+    return result;
+}
+
+SearchResult search_engine_execute(
+    const char *strategy,
+    struct NFA *nfa,
+    const char *text,
+    size_t text_bytes
+) {
+    if (strcmp(strategy, "cpu_line_sequential") == 0) {
+        return cpu_line_sequential(nfa, text, text_bytes);
+    }
+    
+    fprintf(stderr, "[Error] Unknown search strategy: %s\n", strategy);
+    return create_search_result();
 }
 
 
