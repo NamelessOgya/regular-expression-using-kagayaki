@@ -180,6 +180,40 @@ int nfa_test(const NFA *nfa, const char *text)
  * - input:  正規表現文字列 regex="a(b|c)*"
  * - output: 動的確保された NFA構造体 へのポインタ（利用後は nfa_free が必要）
  */
+static void collect_states(State *s, State **pool, int *count, int max_states) {
+    if (s == NULL || s == &matchstate) {
+        return;
+    }
+    
+    // すでに登録されているか重複チェック
+    for (int i = 0; i < *count; i++) {
+        if (pool[i] == s) {
+            return;
+        }
+    }
+    
+    if (*count >= max_states) {
+        return;
+    }
+    
+    pool[(*count)++] = s;
+    
+    collect_states(s->out, pool, count, max_states);
+    collect_states(s->out1, pool, count, max_states);
+}
+
+/**
+ * 正規表現からNFA（実行用構造体）を生成・メモリ確保するメインAPI。
+ * 
+ * [担当処理]
+ * ユーザーが指定した正規表現文字列を受け取り、内部で `re2post` と `post2nfa` を呼び出して
+ * 状態遷移グラフを作成します。生成したグラフや後で使うメモリ領域を `NFA` 構造体に
+ * 格納して返却します。
+ * 
+ * [想定I/O]
+ * - input:  正規表現文字列 regex="a(b|c)*"
+ * - output: 動的確保された NFA構造体 へのポインタ（利用後は nfa_free が必要）
+ */
 NFA *nfa_compile(const char *regex)
 {
     char  *post = re2post((char *)regex);
@@ -191,15 +225,18 @@ NFA *nfa_compile(const char *regex)
     /* プール確保 (nstate は post2nfa 内の global) */
     NFA *nfa = malloc(sizeof *nfa);
     nfa->start = start;
-    nfa->nstate = nstate;
-    nfa->state_pool = malloc(nstate * sizeof(State *));
-    /* 生成された State を DFS で収集して pool に詰める …省略(※) */
+    nfa->state_pool = calloc(nstate, sizeof(State *));
+    
+    int count = 0;
+    collect_states(start, nfa->state_pool, &count, nstate);
+    nfa->nstate = count;
 
     /* List 配列もここで確保 */
     nfa->l1.s = malloc(nstate * sizeof(State *));
     nfa->l2.s = malloc(nstate * sizeof(State *));
     return nfa;
 }
+
 
 /**
  * 長大なテキストの中から、正規表現に部分一致（Substring Match）する箇所が存在するか探索するAPI。

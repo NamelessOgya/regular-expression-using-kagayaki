@@ -68,7 +68,6 @@ union Ptrlist  // unionは一つのメモリ空間を複数の違う型でシェ
 };
 
 /* outpのみを含む要素が一つのみのリストを作成する */
-*/
 
 Ptrlist*
 list1(State **outp)
@@ -148,16 +147,15 @@ append(Ptrlist *l1, Ptrlist *l2)
 State *post2nfa(char *postfix)
 {
     char *p;
-    /* 
-     * 【Frag stack】
-     * 組み立て途中の迷路の断片を積んでおくスタック。
-     * 最大1000個までの断片を保持できる。（深すぎる正規表現は制限にかかる）
-     */
-    Frag stack[1000], *stackp, e1, e2, e;18
+    Frag stack[1000], *stackp, e1, e2, e;
     State *s;
     
     if(postfix == NULL)
         return NULL;
+
+    nstate = 0; // Reset global state count for the new NFA compilation
+
+
 
     /* スタックへ積む・取り出す マクロ */
     #define push(s) *stackp++ = s

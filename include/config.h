@@ -7,3 +7,6 @@
 #define NUM_COL 2
 #define OUTPUT_CSV_TEMPLATE "./results/results_%s%s.csv"   /* ← %s を 2 つに */ 
 #define NFA_EXECUTABLE "./nfa.out"
+
+#define DEFAULT_SUBSET_SIZE 500 // 大量テキストから切り出すデフォルトの文字数（UTF-8文字数）
+#define TARGET_TEXT_PATH "./data/target_text.txt"
