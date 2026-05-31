@@ -4,7 +4,23 @@
 #include "config.h"
 #include <stddef.h>   /* size_t 用 */
 
-typedef struct NFA NFA;          /* 前方宣言 (実体は nfa.c) */
+typedef struct State State;
+
+typedef struct List List;
+struct List
+{
+    State **s;
+    int n;
+};
+
+typedef struct NFA NFA;
+struct NFA {
+    State  *start;   /* 受理オートマトン先頭 */
+    State **state_pool; /* malloc した State* 配列 (free用) */
+    size_t  nstate;
+    List    l1, l2;  /* 再利用するリスト領域 */
+};
+
 
 /* -- NFA Graph Construction (CPU/GPU 共通) -- */
 enum
@@ -14,7 +30,6 @@ enum
     Any   = 258,
 };
 
-typedef struct State State;
 struct State
 {
     int c; // 遷移する文字。Match, Split, Anyは特殊な文字として扱う。

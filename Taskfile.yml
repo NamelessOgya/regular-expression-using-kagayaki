@@ -14,6 +14,21 @@ tasks:
     cmds:
       - task: test_all
 
+  env:setup_nvidia_toolkit:
+    desc: "ホストマシンに NVIDIA Container Toolkit をインストールし、Dockerを再起動する (sudo task env:setup_nvidia_toolkit として実行)"
+    cmds:
+      - echo "Installing GPG key & Repository for nvidia-container-toolkit..."
+      - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      - curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      - echo "Updating package list & installing nvidia-container-toolkit..."
+      - apt-get update
+      - apt-get install -y nvidia-container-toolkit
+      - echo "Configuring nvidia runtime for Docker..."
+      - nvidia-ctk runtime configure --runtime=docker
+      - echo "Restarting Docker daemon..."
+      - systemctl restart docker
+      - echo "NVIDIA Container Toolkit configuration complete! Now you can run 'task env:start'."
+
   env:build:
     desc: "Docker環境のイメージをビルド (ホストPCから実行)"
     cmds:
@@ -37,11 +52,16 @@ tasks:
       - echo "======================================"
       - "{{.CC}} {{.INC}} {{.CFLAGS}} src/common/utils.c src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_utils.c -o test_utils_cpu.out"
       - ./test_utils_cpu.out
-      - echo ""
       - echo "======================================"
       - echo " [2/2] Compiling & Running GPU Utils Test"
       - echo "======================================"
-      - "{{.CC}} {{.INC}} {{.CFLAGS}} -DGPU_RUN src/common/utils.c src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_utils.c -o test_utils_gpu.out"
+      - nvcc -O3 -arch=sm_80 -DGPU_RUN -I./include -I./src/gpu -c src/gpu/nfa_gpu.cu -o nfa_gpu_test.o
+      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/common/utils.c -o utils_test.o
+      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/cpu/nfa_cpu.c -o nfa_cpu_test.o
+      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/common/re2post.c -o re2post_test.o
+      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c src/common/post2nfa.c -o post2nfa_test.o
+      - gcc -I./include -I./src/gpu -Wall -Wextra -g -DGPU_RUN -c tests/test_utils.c -o test_utils_test.o
+      - nvcc -O3 -arch=sm_80 nfa_gpu_test.o utils_test.o nfa_cpu_test.o re2post_test.o post2nfa_test.o test_utils_test.o -o test_utils_gpu.out
       - ./test_utils_gpu.out
       - echo ""
 
@@ -91,15 +111,43 @@ tasks:
     desc: "GPU ベンチマーク実行"
     cmds:
       - echo "Compiling Benchmarks (GPU)..."
-      - "{{.NVCC}} -O3 -arch=sm_80 {{.INC}} -c src/gpu/nfa_gpu.cu -o nfa_gpu.o"
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/nfa_gpu.cu -o nfa_gpu.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu.o"
       - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/utils.c -o utils_gpu.o"
       - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu.o"
       - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu.o"
       - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu.o"
       - echo "Linking..."
-      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu.o utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu.o -o run_benchmark_gpu.out"
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu.o nfa_cpu_gpu.o utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu.o -o run_benchmark_gpu.out"
       - echo "Running Benchmark (GPU)..."
       - ./run_benchmark_gpu.out
+
+  dataset:enwik9:
+    desc: "1GB の enwik9 データセットを自動的にダウンロードして解凍する"
+    cmds:
+      - python3 scripts/setup_enwik9.py
+
+  bench_cpu_enwik9:
+    desc: "1GB の enwik9 データセット全体 (生XML形式) に対して CPU ベンチマークを実行する"
+    cmds:
+      - |
+        if [ ! -f ./run_benchmark.asan ]; then
+          echo "[Warning] './run_benchmark.asan' not found. Compiling now..."
+          task bench_cpu
+        fi
+      - echo "Running Benchmark (CPU with ASan) on 1GB enwik9 raw dataset..."
+      - ./run_benchmark.asan ./data/enwik9 1000000000
+
+  bench_cpu_enwik9_plain:
+    desc: "1GB の enwik9 データセット全体 (XMLタグ除去済みのプレーンテキスト) に対して CPU ベンチマークを実行する"
+    cmds:
+      - |
+        if [ ! -f ./run_benchmark.asan ]; then
+          echo "[Warning] './run_benchmark.asan' not found. Compiling now..."
+          task bench_cpu
+        fi
+      - echo "Running Benchmark (CPU with ASan) on 1GB enwik9 plain dataset..."
+      - ./run_benchmark.asan ./data/enwik9_plain.txt 1000000000
 
   clean:
     desc: "ビルドで発生した中間ファイルを消去"

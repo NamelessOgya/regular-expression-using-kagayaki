@@ -214,6 +214,11 @@ static SearchResult cpu_line_sequential(struct NFA *nfa, const char *text, size_
     return result;
 }
 
+#ifdef GPU_RUN
+SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
+SearchResult gpu_chunk_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
+#endif
+
 SearchResult search_engine_execute(
     const char *strategy,
     struct NFA *nfa,
@@ -223,6 +228,14 @@ SearchResult search_engine_execute(
     if (strcmp(strategy, "cpu_line_sequential") == 0) {
         return cpu_line_sequential(nfa, text, text_bytes);
     }
+#ifdef GPU_RUN
+    if (strcmp(strategy, "gpu_line_parallel") == 0) {
+        return gpu_line_parallel(nfa, text, text_bytes);
+    }
+    if (strcmp(strategy, "gpu_chunk_parallel") == 0) {
+        return gpu_chunk_parallel(nfa, text, text_bytes);
+    }
+#endif
     
     fprintf(stderr, "[Error] Unknown search strategy: %s\n", strategy);
     return create_search_result();

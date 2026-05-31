@@ -42,15 +42,22 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // 一旦ファイル全体（またはバッファ一杯）を読み込むためのバッファ
-    char *large_text_buffer = malloc(MAX_SENTENCE_LENGTH);
+    // ファイル全体のサイズを取得して動的にメモリを確保する
+    fseek(text_file, 0, SEEK_END);
+    long file_size = ftell(text_file);
+    if (file_size <= 0) {
+        file_size = MAX_SENTENCE_LENGTH;
+    }
+    fseek(text_file, 0, SEEK_SET);
+
+    char *large_text_buffer = malloc(file_size + 1);
     if (!large_text_buffer) {
         perror("Failed to allocate memory for large text buffer");
         fclose(text_file);
         return 1;
     }
     
-    size_t read_bytes = fread(large_text_buffer, 1, MAX_SENTENCE_LENGTH - 1, text_file);
+    size_t read_bytes = fread(large_text_buffer, 1, file_size, text_file);
     large_text_buffer[read_bytes] = '\0';
     fclose(text_file);
 
@@ -145,15 +152,33 @@ int main(int argc, char *argv[]) {
         }
         
         printf("regex: %s\n", regex);
-        case_start = now_sec();
-
+        
         // NFAコンパイル
         NFA *nfa = nfa_compile(regex);
         
-        // 統一検索エンジンを介して行単位検索を実行 (計測対象)
-        SearchResult result = search_engine_execute("cpu_line_sequential", nfa, target_subset, subset_bytes);
+        SearchResult result;
+        double case_time;
 
-        double case_time = (double)(now_sec() - case_start);
+#ifdef GPU_RUN
+        // GPU実行モード：両方の並列化アプローチを計測・比較します！
+        printf("  [GPU] Running Simple Line-Parallel Strategy...\n");
+        double start1 = now_sec();
+        result = search_engine_execute("gpu_line_parallel", nfa, target_subset, subset_bytes);
+        case_time = now_sec() - start1;
+
+        printf("  [GPU] Running Overlapping Chunk-Parallel Strategy...\n");
+        double start2 = now_sec();
+        SearchResult result_chunk = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
+        double chunk_time = now_sec() - start2;
+        printf("  [GPU Comparison] Line-Parallel: %.6f sec | Chunk-Parallel: %.6f sec (Chunk matched: %zu)\n", 
+               case_time, chunk_time, result_chunk.count);
+        free_search_result(&result_chunk);
+#else
+        // CPU実行モード
+        case_start = now_sec();
+        result = search_engine_execute("cpu_line_sequential", nfa, target_subset, subset_bytes);
+        case_time = now_sec() - case_start;
+#endif
         // ここでNFA実行完了
 
         // ===== 計測時間外での結果集約およびCSV書き出し (I/O分離) =====

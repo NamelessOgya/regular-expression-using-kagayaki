@@ -21,12 +21,6 @@
  * NFAの探索時に、シミュレーションの「分身たち」が現在どこの部屋にいるかを記憶するためのリスト。
  * NFAは同時に複数の異なる部屋に存在できるため、現在の状態群を配列で一括管理します。
  */
- typedef struct List List;
- struct List
- {
-     State **s; /* 分身がいる部屋（State）へのポインタの配列 */
-     int n;     /* 現在リストにいる分身の数 */
- };
  List l1, l2;
  static int listid;
  
@@ -129,13 +123,7 @@
      return ismatch(clist);
  }
 
-/* --- 追加: NFA ラッパ構造体 ------------------- */
-struct NFA {
-    State  *start;   /* 受理オートマトン先頭 */
-    State **state_pool; /* malloc した State* 配列 (free用) */
-    size_t  nstate;
-    List    l1, l2;  /* 再利用するリスト領域 */
-};
+/* struct NFA is now defined in include/nfa.h */
 
 /**
  * NFAを用いて、入力文字列がパターンの「最初から最後まで完全に一致」するか判定する処理。
@@ -253,34 +241,34 @@ int nfa_search(const NFA *nfa, const char *text)
 {
     if (!nfa || !text) return 0;
 
-    /* const を外す (既存の実装の流儀に従う) */
-    List *l1_ptr = (List*)&nfa->l1;
-    List *l2_ptr = (List*)&nfa->l2;
+    List *clist = (List*)&nfa->l1;
+    List *nlist = (List*)&nfa->l2;
 
-    /* すべての文字の開始位置からマッチングを試みる */
-    for (int i = 0; text[i] != '\0'; ++i) {
-        List *clist = startlist(nfa->start, l1_ptr);
-        List *nlist = l2_ptr;
+    // 初期状態リストをセットアップ
+    clist->n = 0;
+    listid++;
+    addstate(clist, nfa->start);
 
-        /* 空文字で即マッチ可能（^など）なケースへの対応 */
+    // 空文字で即マッチ可能（^など）なケースへの対応
+    if (ismatch(clist)) {
+        return 1;
+    }
+
+    // 1文字ずつ走査するシングルパス探索 (時間計算量 O(L))
+    for (const unsigned char *p = (const unsigned char*)text; *p; ++p) {
+        step(clist, *p, nlist);
+        
+        // テキストの各開始位置からのマッチングを並列追跡するため、
+        // 毎ステップ開始状態(start)をリストに追加する
+        addstate(nlist, nfa->start);
+
+        List *tmp = clist;
+        clist = nlist;
+        nlist = tmp;
+
+        // マッチした時点で即座に 1 を返す
         if (ismatch(clist)) {
             return 1;
-        }
-
-        for (const unsigned char *p = (const unsigned char*)(text + i); *p; ++p) {
-            step(clist, *p, nlist);
-            List *tmp = clist;
-            clist = nlist;
-            nlist = tmp;
-
-            /* 途中でマッチ状態に到達したらそこで探索成功として返す */
-            if (ismatch(clist)) {
-                return 1;
-            }
-            /* 可能性が完全に途絶えたら内部ループを早抜け */
-            if (clist->n == 0) {
-                break;
-            }
         }
     }
     return 0;
