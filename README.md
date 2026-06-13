@@ -13,8 +13,8 @@ GPUを用いて正規表現マッチの高速化を行う。
 
 ```
 .
-├── compile_and_conduct_test_cpu.sh   # CPU版 ビルド＆テスト実行スクリプト
-├── compile_and_conduct_test_gpu.sh   # GPU版 ビルド＆テスト実行スクリプト
+├── compile_and_conduct_test_cpu.sh   # CPU版 ビルド＆ベンチマーク実験スクリプト
+├── compile_and_conduct_test_gpu.sh   # GPU版 ビルド＆ベンチマーク実験スクリプト
 ├── setup_dataset.sh                  # Wikipediaデータセット DL・整形スクリプト
 ├── Dockerfile                        # 開発環境用 Dockerfile (ubuntu:20.04)
 ├── env/
@@ -31,8 +31,8 @@ GPUを用いて正規表現マッチの高速化を行う。
 │   ├── nfa.cu                        # NFA 実装 (GPU版 CUDA)
 │   └── nfa_cpu_common.h
 ├── src/
-│   └── test_nfa.c                    # テストプログラム
-├── data/                             # テストデータ置き場（DL後に生成）
+│   └── test_nfa.c                    # ベンチマーク実験プログラム
+├── data/                             # 実験データ置き場（DL後に生成）
 └── results/                          # 実行結果 CSV 出力先
 ```
 
@@ -70,14 +70,14 @@ Dockerで `--gpus all` オプションを使うために、ホストマシンへ
 ./env/vm_hosting_sh/start_container.sh
 ```
 
-リポジトリのルートディレクトリが `/app` としてマウントされたコンテナに入る。
+リポジトリのルートディレクトリが `/app` としてマウントされたコンテナに入る。  
+`WORKDIR /app` が設定されているため、起動直後から `/app` にいる。
 
 ### 3. Wikipediaデータセットの準備（初回のみ）
 
 コンテナ内で以下を実行する。
 
 ```bash
-cd /app
 ./setup_dataset.sh
 ```
 
@@ -90,12 +90,11 @@ cd /app
 
 > **注意**: `curl` と `python3` が必要。コンテナ内には同梱済み。
 
-### 4-a. CPU版テストの実行
+### 4-a. CPU版ベンチマーク実験の実行
 
 コンテナ内で以下を実行する。
 
 ```bash
-cd /app
 ./compile_and_conduct_test_cpu.sh
 ```
 
@@ -107,12 +106,11 @@ cd /app
 
 実行完了後、`./results/` に結果 CSV が出力される。
 
-### 4-b. GPU版テストの実行
+### 4-b. GPU版ベンチマーク実験の実行
 
 コンテナ内で以下を実行する。
 
 ```bash
-cd /app
 ./compile_and_conduct_test_gpu.sh
 ```
 
