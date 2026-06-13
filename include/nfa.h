@@ -1,46 +1,58 @@
 /* nfa.h */
-#ifndef NFA_H_
-#define NFA_H_
+#pragma once
 
 #include "config.h"
-#include <stddef.h>   /* サイズを表す size_t という型を使うためのおまじないです */
+#include <stddef.h>   /* size_t 用 */
 
-// NFA (非決定性有限オートマトン) という、正規表現を処理するための「設計図」のようなものを表すデータ型です。
-// 中身の複雑な仕組みは別の場所(nfa.c)で定義されています。
+typedef struct State State;
+
+typedef struct List List;
+struct List
+{
+    State **s;
+    int n;
+};
+
 typedef struct NFA NFA;
+struct NFA {
+    State  *start;   /* 受理オートマトン先頭 */
+    State **state_pool; /* malloc した State* 配列 (free用) */
+    size_t  nstate;
+    List    l1, l2;  /* 再利用するリスト領域 */
+};
 
-// ---------------------------------------------------------
-// 基本的な機能（既存の機能）
-// ---------------------------------------------------------
 
-// 1. 正規表現のルールを読み込んで、NFA（設計図）を作り出します。
+/* -- NFA Graph Construction (CPU/GPU 共通) -- */
+enum
+{
+    Match = 256,
+    Split = 257,
+    Any   = 258,
+};
+
+struct State
+{
+    int c; // 遷移する文字。Match, Split, Anyは特殊な文字として扱う。
+    State *out; // 次にどのStateに行くか。Stateのポインタが入る。
+    State *out1; // 分岐がある場合、もう一つのStateのポインタが入る。正規表現は2つの分岐で表現できるはずなので、out1まであれば十分。
+    int lastlist; // NFA探索時（実行時）に同じStateが重複してリストに登録されたり、無限ループに陥るのを防ぐための「訪問済マーカー（世代ID）」。
+};
+
+extern State matchstate;
+extern int nstate;
+
+State *post2nfa(char *postfix);
+
+/* 既存 API */
 NFA   *nfa_compile(const char *regex);
-
-// 2. テキストが正規表現にマッチする（一致する）かどうかをテストします。
 int    nfa_test(const NFA *nfa, const char *text);
-
-// 3. 使い終わったNFA（設計図）をゴミ箱に捨てて、メモリを片付けます。
 void   nfa_free(NFA *nfa);
 
+/* 新しい直列検索用 API */
+int nfa_search(const NFA *nfa, const char *text);
 
-// ---------------------------------------------------------
-// リストから検索する機能
-// ---------------------------------------------------------
-
-// 文字列のリストから、正規表現に一致するものを探し出し、ヒットした番号（インデックス）を out_idx に保存します。
-size_t nfa_grep_idx(
-        const NFA         *nfa,      // 検索に使うNFA（設計図）
-        const char *const *list,     // 検索対象の文字列のリスト
-        size_t             n,        // リストの中にある文字列の数
-        size_t            *out_idx   // ヒットした番号を保存する配列
-);
-
-// 上の関数と似ていますが、固定サイズの配列（2次元配列）を直接受け取るバージョンです。
-size_t nfa_grep_idx_arr(
-        const NFA *nfa,                            // 検索に使うNFA
-        const char list[][MAX_LINE_LENGTH],        // 検索対象の2次元配列
-        size_t     n,                              // リストの要素数
-        size_t    *out_idx                         // ヒットした番号を保存する配列
-);
-
-#endif /* NFA_H_ */
+/* 
+ * Regex Parser (CPU/GPU共通)
+ * 中置記法の正規表現を逆ポーランド記法(後置表現)に変換する
+ */
+char* re2post(char *re);

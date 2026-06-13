@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 set -e
 
-INC="-I./include"
-# デバッグ＋ASan 用フラグ
+INC="-I./include -I./src/gpu -I./src/gpu/common -I./src/gpu/line_parallel -I./src/gpu/chunk_parallel"
 CFLAGS="-g -O1 -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra"
 LDFLAGS="-fsanitize=address"
 
-# 1) ライブラリ部をオブジェクト化
-gcc $INC $CFLAGS -c sandbox/nfa.c -o nfa.o
+echo "=== Compiling (CPU with ASan) ==="
+gcc $INC $CFLAGS -c src/cpu/nfa_cpu.c      -o nfa_cpu.o
+gcc $INC $CFLAGS -c src/common/utils.c     -o utils.o
+gcc $INC $CFLAGS -c src/common/re2post.c   -o re2post.o
+gcc $INC $CFLAGS -c src/common/post2nfa.c  -o post2nfa.o
+gcc $INC $CFLAGS -c app/run_benchmark.c    -o run_benchmark.o
 
-# 2) テストプログラムをオブジェクト化
-gcc $INC $CFLAGS -c src/test_nfa.c -o test_nfa.o
+echo "=== Linking ==="
+gcc $LDFLAGS nfa_cpu.o utils.o re2post.o post2nfa.o run_benchmark.o -o run_benchmark.asan
 
-# 3) リンクして実行ファイル生成
-gcc $LDFLAGS nfa.o test_nfa.o -o test_nfa.asan
-
-# 4) 実行
-chmod +x test_nfa.asan
-./test_nfa.asan
+echo "=== Running Benchmark (CPU) ==="
+./run_benchmark.asan

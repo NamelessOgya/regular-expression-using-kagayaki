@@ -1,0 +1,189 @@
+version: '3'
+
+vars:
+  CC: gcc
+  NVCC: nvcc
+  INC: -I./include -I./src/gpu -I./src/gpu/common -I./src/gpu/line_parallel -I./src/gpu/chunk_parallel
+  CFLAGS: "-Wall -Wextra -g"
+  CFLAGS_OPT: -O3
+  CFLAGS_ASAN: "-g -O1 -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra"
+  LDFLAGS_ASAN: -fsanitize=address
+
+tasks:
+  default:
+    cmds:
+      - task: test_all
+
+  env:setup_nvidia_toolkit:
+    desc: "ホストマシンに NVIDIA Container Toolkit をインストールし、Dockerを再起動する (sudo task env:setup_nvidia_toolkit として実行)"
+    cmds:
+      - echo "Installing GPG key & Repository for nvidia-container-toolkit..."
+      - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      - curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      - echo "Updating package list & installing nvidia-container-toolkit..."
+      - apt-get update
+      - apt-get install -y nvidia-container-toolkit
+      - echo "Configuring nvidia runtime for Docker..."
+      - nvidia-ctk runtime configure --runtime=docker
+      - echo "Restarting Docker daemon..."
+      - systemctl restart docker
+      - echo "NVIDIA Container Toolkit configuration complete! Now you can run 'task env:start'."
+
+  env:build:
+    desc: "Docker環境のイメージをビルド (ホストPCから実行)"
+    cmds:
+      - docker build -t kagayaki-nfa-env .
+
+  env:start:
+    desc: "Docker環境に入って開発を開始する (ホストPCから実行)"
+    cmds:
+      - docker run --rm -it --name kagayaki-nfa-container --gpus all -v "$(pwd)":/app kagayaki-nfa-env bash
+
+  env:stop:
+    desc: "起動中のコンテナを明示的に停止・破棄する (ホストPCから実行)"
+    cmds:
+      - docker stop kagayaki-nfa-container || true
+
+  test_utils:
+    desc: "ユーティリティのテスト (CPU & GPU)"
+    cmds:
+      - echo "======================================"
+      - echo " [1/2] Compiling & Running CPU Utils Test"
+      - echo "======================================"
+      - "{{.CC}} {{.INC}} {{.CFLAGS}} src/common/utils.c src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_utils.c -o test_utils_cpu.out"
+      - ./test_utils_cpu.out
+      - echo "======================================"
+      - echo " [2/2] Compiling & Running GPU Utils Test"
+      - echo "======================================"
+      - nvcc -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/line_parallel/nfa_gpu_line.cu -o nfa_gpu_line_test.o
+      - nvcc -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/common/utils.c -o utils_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/cpu/nfa_cpu.c -o nfa_cpu_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/common/re2post.c -o re2post_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c src/common/post2nfa.c -o post2nfa_test.o
+      - gcc {{.INC}} -Wall -Wextra -g -DGPU_RUN -c tests/test_utils.c -o test_utils_test.o
+      - nvcc -O3 -arch=sm_80 nfa_gpu_line_test.o nfa_gpu_chunk_test.o utils_test.o nfa_cpu_test.o re2post_test.o post2nfa_test.o test_utils_test.o -o test_utils_gpu.out
+      - ./test_utils_gpu.out
+      - echo ""
+
+  test_unit:
+    desc: "NFAエンジンの単体テスト"
+    cmds:
+      - echo "======================================"
+      - echo " Compiling & Running Unit Tests for NFA"
+      - echo "======================================"
+      - "{{.CC}} {{.INC}} {{.CFLAGS}} src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_unit_nfa.c -o test_unit.out"
+      - ./test_unit.out
+      - echo ""
+
+  test_search_engine:
+    desc: "検索エンジンの抽象化と行単位マッチングのテスト (CPU with ASan)"
+    cmds:
+      - echo "======================================"
+      - echo " Compiling & Running Search Engine Unit Tests"
+      - echo "======================================"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} src/common/utils.c src/cpu/nfa_cpu.c src/common/re2post.c src/common/post2nfa.c tests/test_search_engine.c {{.LDFLAGS_ASAN}} -o test_search_engine.asan"
+      - ./test_search_engine.asan
+      - echo ""
+
+  test_all:
+    desc: "すべてのテストを一括実行"
+    cmds:
+      - task: test_utils
+      - task: test_unit
+      - task: test_search_engine
+      - echo "All tests completed successfully!"
+
+  bench_cpu:
+    desc: "CPU ベンチマーク実行 (ASanつき)"
+    cmds:
+      - echo "Compiling Benchmarks (CPU with ASan)..."
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c src/cpu/nfa_cpu.c -o nfa_cpu.o"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c src/common/utils.c -o utils.o"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c src/common/re2post.c -o re2post.o"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c src/common/post2nfa.c -o post2nfa.o"
+      - "{{.CC}} {{.INC}} {{.CFLAGS_ASAN}} -c app/run_benchmark.c -o run_benchmark.o"
+      - echo "Linking..."
+      - "{{.CC}} {{.LDFLAGS_ASAN}} nfa_cpu.o utils.o re2post.o post2nfa.o run_benchmark.o -o run_benchmark.asan"
+      - echo "Running Benchmark (CPU)..."
+      - ./run_benchmark.asan
+
+  bench_gpu_line:
+    desc: "GPU 行並列ベンチマーク実行"
+    cmds:
+      - echo "Compiling Benchmarks (GPU Line)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_LINE_RUN {{.INC}} -c src/gpu/line_parallel/nfa_gpu_line.cu -o nfa_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/common/utils.c -o utils_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu_line.o"
+      - "{{.CC}} -O3 -DGPU_LINE_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu_line.o"
+      - echo "Linking..."
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu_line.o nfa_cpu_gpu_line.o utils_gpu_line.o re2post_gpu_line.o post2nfa_gpu_line.o run_benchmark_gpu_line.o -o run_benchmark_gpu_line.out"
+      - echo "Running Benchmark (GPU Line)..."
+      - ./run_benchmark_gpu_line.out
+
+  bench_gpu_chunk:
+    desc: "GPU チャンク並列ベンチマーク実行"
+    cmds:
+      - echo "Compiling Benchmarks (GPU Chunk)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_CHUNK_RUN {{.INC}} -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/common/utils.c -o utils_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu_chunk.o"
+      - "{{.CC}} -O3 -DGPU_CHUNK_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu_chunk.o"
+      - echo "Linking..."
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu_chunk.o nfa_cpu_gpu_chunk.o utils_gpu_chunk.o re2post_gpu_chunk.o post2nfa_gpu_chunk.o run_benchmark_gpu_chunk.o -o run_benchmark_gpu_chunk.out"
+      - echo "Running Benchmark (GPU Chunk)..."
+      - ./run_benchmark_gpu_chunk.out
+
+  bench_gpu:
+    desc: "GPU 比較ベンチマーク実行"
+    cmds:
+      - echo "Compiling Benchmarks (GPU Comparison)..."
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/line_parallel/nfa_gpu_line.cu -o nfa_gpu_line_cmp.o"
+      - "{{.NVCC}} -O3 -arch=sm_80 -DGPU_RUN {{.INC}} -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/cpu/nfa_cpu.c -o nfa_cpu_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/utils.c -o utils_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/re2post.c -o re2post_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c src/common/post2nfa.c -o post2nfa_gpu_cmp.o"
+      - "{{.CC}} -O3 -DGPU_RUN {{.INC}} -c app/run_benchmark.c -o run_benchmark_gpu_cmp.o"
+      - echo "Linking..."
+      - "{{.NVCC}} -O3 -arch=sm_80 nfa_gpu_line_cmp.o nfa_gpu_chunk_cmp.o nfa_cpu_gpu_cmp.o utils_gpu_cmp.o re2post_gpu_cmp.o post2nfa_gpu_cmp.o run_benchmark_gpu_cmp.o -o run_benchmark_gpu.out"
+      - echo "Running Benchmark (GPU Comparison)..."
+      - ./run_benchmark_gpu.out
+
+  dataset:enwik9:
+    desc: "1GB の enwik9 データセットを自動的にダウンロードして解凍する"
+    cmds:
+      - python3 scripts/setup_enwik9.py
+
+  bench_cpu_enwik9:
+    desc: "1GB の enwik9 データセット全体 (生XML形式) に対して CPU ベンチマークを実行する"
+    cmds:
+      - |
+        if [ ! -f ./run_benchmark.asan ]; then
+          echo "[Warning] './run_benchmark.asan' not found. Compiling now..."
+          task bench_cpu
+        fi
+      - echo "Running Benchmark (CPU with ASan) on 1GB enwik9 raw dataset..."
+      - ./run_benchmark.asan ./data/enwik9 1000000000
+
+  bench_cpu_enwik9_plain:
+    desc: "1GB の enwik9 データセット全体 (XMLタグ除去済みのプレーンテキスト) に対して CPU ベンチマークを実行する"
+    cmds:
+      - |
+        if [ ! -f ./run_benchmark.asan ]; then
+          echo "[Warning] './run_benchmark.asan' not found. Compiling now..."
+          task bench_cpu
+        fi
+      - echo "Running Benchmark (CPU with ASan) on 1GB enwik9 plain dataset..."
+      - ./run_benchmark.asan ./data/enwik9_plain.txt 1000000000
+
+  clean:
+    desc: "ビルドで発生した中間ファイルを消去"
+    cmds:
+      - echo "Cleaning up generated files..."
+      - rm -f *.o *.out *.asan
+      - echo "Clean completed."
