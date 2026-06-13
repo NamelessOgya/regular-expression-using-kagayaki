@@ -12,6 +12,10 @@
 
 // 出力するCSVファイルの名前のひな形です。
 // %sの部分には、後でプログラムが「日付・時刻」や「GPUの使用有無」を自動的に当てはめます。
-#define OUTPUT_CSV_TEMPLATE "./results/results_%s%s.csv" 
+#define OUTPUT_CSV_TEMPLATE "./results/results_%s%s.csv"
 
 #define NFA_EXECUTABLE "./nfa.out" // 実行ファイルの名前
+
+// データセット関連の設定
+#define DEFAULT_SUBSET_SIZE 500    // 大量テキストから切り出すデフォルトの文字数（UTF-8文字数）
+#define TARGET_TEXT_PATH "./data/target_text.txt" // 検索対象テキストファイルのパス
