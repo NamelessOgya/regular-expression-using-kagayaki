@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================
-# run_sweep.sh
-# 正規表現 × テキスト文字数のグリッドでベンチマークを実行し、
-# 結果を results/sweep_<timestamp>.csv にまとめる。
+# run_sweep_gpu.sh
+# GPU版 ベンチマークスイープスクリプト
+# 正規表現 × テキスト文字数のグリッドで GPU ベンチマークを実行し、
+# 結果を results/sweep_gpu_<timestamp>.csv にまとめる。
 #
 # 使い方:
-#   ./run_sweep.sh                              # 全サイズ自動 (100→...→MAX)
-#   ./run_sweep.sh ./data/wiki_plain.txt        # ファイル指定
-#   ./run_sweep.sh ./data/wiki_plain.txt 100 1000 10000  # サイズ手動指定
+#   ./run_sweep_gpu.sh                        # wiki_plain.txt を対象に全サイズ実行
+#   ./run_sweep_gpu.sh ./data/wiki_plain.txt  # ファイル指定
 # =============================================================
 set -e
 
@@ -22,7 +22,7 @@ if [ ! -f "$WIKI_FILE" ]; then
     exit 1
 fi
 
-# UTF-8 文字数を正確に取得（wc -c はバイト数なので Python で計算）
+# UTF-8 文字数を正確に取得
 MAX_CHARS=$(python3 -c "
 with open('$WIKI_FILE', encoding='utf-8', errors='ignore') as f:
     print(len(f.read()))
@@ -37,70 +37,63 @@ while [ "$s" -lt "$MAX_CHARS" ]; do
 done
 SIZES+=("$MAX_CHARS")
 
-BINARY="./run_benchmark.asan"
+BINARY="./run_benchmark_gpu.out"
 TIMESTAMP=$(date +%Y%m%d_%H_%M_%S)
-SWEEP_DIR="./results/sweep_${TIMESTAMP}"   # 各サイズの生CSVをここに置く
-SUMMARY="./results/sweep_${TIMESTAMP}.csv"
+SWEEP_DIR="./results/sweep_gpu_${TIMESTAMP}"
+SUMMARY="./results/sweep_gpu_${TIMESTAMP}.csv"
+MANIFEST="${SWEEP_DIR}/manifest.txt"
 mkdir -p "$SWEEP_DIR"
 
 echo "=================================================="
-echo " Benchmark Sweep"
-echo " Target : $WIKI_FILE  (~${MAX_CHARS} bytes)"
+echo " GPU Benchmark Sweep"
+echo " Target : $WIKI_FILE  (~${MAX_CHARS} chars)"
 echo " Sizes  : ${SIZES[*]}"
 echo " Summary: $SUMMARY"
 echo "=================================================="
 
 # --------------------------------------------------------
-# ビルド
+# ビルド (GPU 比較モード: CPU + GPU Line + GPU Chunk)
 # --------------------------------------------------------
 echo ""
-echo "[Build] Compiling benchmark binary..."
-INC="-I./include -I./src/gpu/common -I./src/gpu/line_parallel -I./src/gpu/chunk_parallel"
-CFLAGS_ASAN="-g -O1 -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra"
-LDFLAGS_ASAN="-fsanitize=address"
+echo "[Build] Compiling GPU benchmark binary..."
+INC="-I./include -I./src/gpu -I./src/gpu/common -I./src/gpu/line_parallel -I./src/gpu/chunk_parallel"
+OPT="-O3"
 
-gcc $INC $CFLAGS_ASAN -c src/cpu/nfa_cpu.c     -o nfa_cpu.o
-gcc $INC $CFLAGS_ASAN -c src/common/utils.c    -o utils.o
-gcc $INC $CFLAGS_ASAN -c src/common/re2post.c  -o re2post.o
-gcc $INC $CFLAGS_ASAN -c src/common/post2nfa.c -o post2nfa.o
-gcc $INC $CFLAGS_ASAN -c app/run_benchmark.c   -o run_benchmark.o
-gcc $LDFLAGS_ASAN nfa_cpu.o utils.o re2post.o post2nfa.o run_benchmark.o -o "$BINARY"
+nvcc $OPT -arch=sm_80 -DGPU_RUN $INC -c src/gpu/line_parallel/nfa_gpu_line.cu   -o nfa_gpu_line.o
+nvcc $OPT -arch=sm_80 -DGPU_RUN $INC -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk.o
+gcc  $OPT             -DGPU_RUN $INC -c src/cpu/nfa_cpu.c                        -o nfa_cpu_gpu.o
+gcc  $OPT             -DGPU_RUN $INC -c src/common/utils.c                       -o utils_gpu.o
+gcc  $OPT             -DGPU_RUN $INC -c src/common/re2post.c                     -o re2post_gpu.o
+gcc  $OPT             -DGPU_RUN $INC -c src/common/post2nfa.c                    -o post2nfa_gpu.o
+gcc  $OPT             -DGPU_RUN $INC -c app/run_benchmark.c                      -o run_benchmark_gpu.o
+nvcc $OPT -arch=sm_80 \
+    nfa_gpu_line.o nfa_gpu_chunk.o nfa_cpu_gpu.o \
+    utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu.o \
+    -o "$BINARY"
 echo "[Build] OK -> $BINARY"
 
 # --------------------------------------------------------
-# サイズごとに実行（結果を SWEEP_DIR に移動して管理）
+# サイズごとに実行
 # --------------------------------------------------------
-# "raw_csvパス:文字数" を1行ずつ記録するファイル
-MANIFEST="${SWEEP_DIR}/manifest.txt"
-
 for size in "${SIZES[@]}"; do
     echo ""
     echo "----------------------------------------------"
     echo " [RUN] size = ${size} chars"
     echo "----------------------------------------------"
 
-    # run_benchmark.asan は ./results/results_<timestamp>.csv を生成する
-    # 実行直前・直後のファイルを比較するのではなく、
-    # 出力先を SWEEP_DIR に向けるためシンボリックリンクを一時的に差し替える。
-    # →より確実: RESULTS 環境変数は使えないため、実行後に最新ファイルを mv する。
-
-    # 実行前のファイル一覧を記録
-    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_before.txt || true
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gpu_before.txt || true
 
     "$BINARY" "$WIKI_FILE" "$size"
 
-    # 実行後に新しく増えたファイルを特定
-    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_after.txt || true
-    NEW_FILE=$(comm -13 /tmp/sweep_before.txt /tmp/sweep_after.txt | head -1 || true)
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gpu_after.txt || true
+    NEW_FILE=$(comm -13 /tmp/sweep_gpu_before.txt /tmp/sweep_gpu_after.txt | head -1 || true)
 
     if [ -z "$NEW_FILE" ]; then
-        # 同秒内に複数実行された場合: 最新を使う（重複可能性あり）
         NEW_FILE=$(ls -t ./results/results_*.csv 2>/dev/null | head -1 || true)
         echo "[WARN] Could not detect new file by diff; using latest: $NEW_FILE"
     fi
 
     if [ -n "$NEW_FILE" ]; then
-        # SWEEP_DIR にサイズ付きの名前でコピー
         DEST="${SWEEP_DIR}/result_size${size}.csv"
         cp "$NEW_FILE" "$DEST"
         echo "${DEST}:${size}" >> "$MANIFEST"
@@ -159,10 +152,15 @@ PYEOF
 
 echo ""
 echo "=================================================="
-echo " Sweep complete!"
+echo " GPU Sweep complete!"
 echo " Raw CSVs : $SWEEP_DIR/"
 echo " Summary  : $SUMMARY"
 echo "=================================================="
 echo ""
-echo "--- Preview (first 30 rows) ---"
-head -31 "$SUMMARY"
+echo "--- Preview (first 20 rows) ---"
+head -21 "$SUMMARY"
+echo ""
+echo "--- グラフ生成 ---"
+echo "python3 scripts/plot_benchmark.py \\"
+echo "    --cpu results/sweep_<CPU_TIMESTAMP>.csv \\"
+echo "    --gpu $SUMMARY"
