@@ -2,11 +2,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h> 
+#include <unistd.h>
+#include <signal.h>
+#include <setjmp.h>
 
 #include "config.h"
 #include "nfa.h"
 #include "utils.h"
+
+// ============================================================
+// タイムアウト制御
+// ============================================================
+static sigjmp_buf  timeout_env;
+static volatile sig_atomic_t timed_out = 0;
+
+static void alarm_handler(int sig) {
+    (void)sig;
+    timed_out = 1;
+    siglongjmp(timeout_env, 1); // ループの先頭（sigsetjmpの直後）に飛ぶ
+}
 
 /* 
  * 以下の配列は非常にサイズが大きいため（MAX_SENTENCE_LENGTH = 100,000など）、
@@ -34,6 +48,13 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "[Warning] Invalid subset size '%s'. Using default: %zu\n", argv[2], subset_char_limit);
         }
     }
+
+    // SIGALRM ハンドラの登録（タイムアウト用）
+    struct sigaction sa;
+    sa.sa_handler = alarm_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;  // SA_RESTART は付けない（システムコールを再開させない）
+    sigaction(SIGALRM, &sa, NULL);
 
     // 大容量テキストデータの読み込み
     FILE *text_file = fopen(text_path, "r");
@@ -152,50 +173,71 @@ int main(int argc, char *argv[]) {
         }
         
         printf("regex: %s\n", regex);
-        
-        // NFAコンパイル
-        NFA *nfa = nfa_compile(regex);
-        
-        SearchResult result;
+
+        // ============================================================
+        // タイムアウト付き実行
+        // alarm() で BENCHMARK_TIMEOUT_SEC 秒後に SIGALRM を送る。
+        // SIGALRM が来たら alarm_handler が siglongjmp し、else 節に飛ぶ。
+        // ============================================================
+        NFA * volatile nfa = NULL;
+        SearchResult result = {0};
         double case_time;
+        volatile int did_timeout = 0;
+
+        timed_out = 0;
+        alarm(BENCHMARK_TIMEOUT_SEC); // タイマースタート
+
+        if (sigsetjmp(timeout_env, 1) == 0) {
+            // ---- 通常実行パス ----
+            nfa = nfa_compile(regex);
 
 #if defined(GPU_LINE_RUN)
-        // GPU 行並列実行モード
-        printf("  [GPU Line] Running Simple Line-Parallel Strategy...\n");
-        double start = now_sec();
-        result = search_engine_execute("gpu_line_parallel", nfa, target_subset, subset_bytes);
-        case_time = now_sec() - start;
+            printf("  [GPU Line] Running Simple Line-Parallel Strategy...\n");
+            double start = now_sec();
+            result = search_engine_execute("gpu_line_parallel", nfa, target_subset, subset_bytes);
+            case_time = now_sec() - start;
 #elif defined(GPU_CHUNK_RUN)
-        // GPU チャンク並列実行モード
-        printf("  [GPU Chunk] Running Overlapping Chunk-Parallel Strategy...\n");
-        double start = now_sec();
-        result = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
-        case_time = now_sec() - start;
+            printf("  [GPU Chunk] Running Overlapping Chunk-Parallel Strategy...\n");
+            double start = now_sec();
+            result = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
+            case_time = now_sec() - start;
 #elif defined(GPU_RUN)
-        // GPU 比較モード（両方を同時実行）
-        printf("  [GPU] Running Simple Line-Parallel Strategy...\n");
-        double start1 = now_sec();
-        result = search_engine_execute("gpu_line_parallel", nfa, target_subset, subset_bytes);
-        case_time = now_sec() - start1;
+            printf("  [GPU] Running Simple Line-Parallel Strategy...\n");
+            double start1 = now_sec();
+            result = search_engine_execute("gpu_line_parallel", nfa, target_subset, subset_bytes);
+            case_time = now_sec() - start1;
 
-        printf("  [GPU] Running Overlapping Chunk-Parallel Strategy...\n");
-        double start2 = now_sec();
-        SearchResult result_chunk = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
-        double chunk_time = now_sec() - start2;
-        printf("  [GPU Comparison] Line-Parallel: %.6f sec | Chunk-Parallel: %.6f sec (Chunk matched: %zu)\n", 
-               case_time, chunk_time, result_chunk.count);
-        free_search_result(&result_chunk);
+            printf("  [GPU] Running Overlapping Chunk-Parallel Strategy...\n");
+            double start2 = now_sec();
+            SearchResult result_chunk = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
+            double chunk_time = now_sec() - start2;
+            printf("  [GPU Comparison] Line-Parallel: %.6f sec | Chunk-Parallel: %.6f sec (Chunk matched: %zu)\n",
+                   case_time, chunk_time, result_chunk.count);
+            free_search_result(&result_chunk);
 #else
-        // CPU実行モード
-        case_start = now_sec();
-        result = search_engine_execute("cpu_line_sequential", nfa, target_subset, subset_bytes);
-        case_time = now_sec() - case_start;
+            case_start = now_sec();
+            result = search_engine_execute("cpu_line_sequential", nfa, target_subset, subset_bytes);
+            case_time = now_sec() - case_start;
 #endif
+            alarm(0); // タイマーキャンセル
+
+        } else {
+            // ---- タイムアウトパス ----
+            did_timeout = 1;
+            case_time = (double)BENCHMARK_TIMEOUT_SEC;
+            alarm(0); // 念のためキャンセル
+            printf("[TIMEOUT] regex '%s' exceeded %d sec. Recording as %.0f sec.\n",
+                   regex, BENCHMARK_TIMEOUT_SEC, case_time);
+        }
         // ここでNFA実行完了
 
         // ===== 計測時間外での結果集約およびCSV書き出し (I/O分離) =====
         char *csv_details = NULL;
-        if (result.count > 0) {
+        if (did_timeout) {
+            // タイムアウト時: マッチ情報なし
+            csv_details = strdup("TIMEOUT");
+            if (!csv_details) { perror("strdup"); exit(EXIT_FAILURE); }
+        } else if (result.count > 0) {
             size_t details_capacity = 4096;
             csv_details = malloc(details_capacity);
             if (!csv_details) {
@@ -204,13 +246,10 @@ int main(int argc, char *argv[]) {
             }
             csv_details[0] = '\0';
             size_t details_len = 0;
-            
+
             for (size_t i = 0; i < result.count; i++) {
                 char temp_match[16384];
-                // "Line %d: " を最初に安全に書き込む
                 int header_len = snprintf(temp_match, sizeof(temp_match), "Line %d: ", result.items[i].line_number);
-                
-                // 行の中身にあるダブルクォートをエスケープ (" -> "") しながら安全にコピーする
                 int dest_idx = header_len;
                 const char *src = result.items[i].line_content;
                 while (*src != '\0' && dest_idx < (int)sizeof(temp_match) - 3) {
@@ -223,22 +262,15 @@ int main(int argc, char *argv[]) {
                     src++;
                 }
                 temp_match[dest_idx] = '\0';
-                
+
                 size_t temp_len = strlen(temp_match);
                 size_t needed = details_len + temp_len + (i > 0 ? 3 : 0) + 1;
-                
                 if (needed > details_capacity) {
-                    while (details_capacity < needed) {
-                        details_capacity *= 2;
-                    }
+                    while (details_capacity < needed) details_capacity *= 2;
                     char *new_details = realloc(csv_details, details_capacity);
-                    if (!new_details) {
-                        perror("realloc for CSV details failed");
-                        exit(EXIT_FAILURE);
-                    }
+                    if (!new_details) { perror("realloc"); exit(EXIT_FAILURE); }
                     csv_details = new_details;
                 }
-                
                 if (i > 0) {
                     strcat(csv_details, " | ");
                     details_len += 3;
@@ -254,23 +286,32 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // ターミナル出力 (クリーンな要約のみ)
+        // ターミナル出力
         printf("Query: %s\n", regex);
         printf("Target (subset): [Length: %zu chars (%zu bytes)]\n", char_count, subset_bytes);
-        printf("Matched Lines: %zu lines\n", result.count);
-        printf("Execution Time: %.6f sec (Pure CPU calculation)\n", case_time);
+        if (did_timeout) {
+            printf("Matched Lines: - (TIMEOUT)\n");
+            printf("Execution Time: %.6f sec [TIMEOUT: exceeded %d sec]\n",
+                   case_time, BENCHMARK_TIMEOUT_SEC);
+        } else {
+            printf("Matched Lines: %zu lines\n", result.count);
+            printf("Execution Time: %.6f sec\n", case_time);
+        }
         printf("------------------------\n");
 
-        // 1クエリにつき1行でCSVに出力
-        fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"%zu\",\"%s\",%.6f\n", 
-                regex, char_count, result.count, csv_details, case_time);
-
-        // 不要になったメモリの解放
-        free(csv_details);
-        free_search_result(&result);
-        if (nfa) {
-            nfa_free(nfa);
+        // CSVへの書き出し（タイムアウト時はマッチ数を "-" で記録）
+        if (did_timeout) {
+            fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"-\",\"%s\",%.6f\n",
+                    regex, char_count, csv_details, case_time);
+        } else {
+            fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"%zu\",\"%s\",%.6f\n",
+                    regex, char_count, result.count, csv_details, case_time);
         }
+
+        // メモリ解放（タイムアウト時は SearchResult が未初期化のため free しない）
+        free(csv_details);
+        if (!did_timeout) free_search_result(&result);
+        if (nfa) nfa_free(nfa);
 
         total_time += case_time;
     }

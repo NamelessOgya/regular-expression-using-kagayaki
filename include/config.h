@@ -16,3 +16,6 @@
 // データセット関連の設定
 #define DEFAULT_SUBSET_SIZE 500              // テキストから切り出すデフォルト文字数（UTF-8文字数）
 #define TARGET_TEXT_PATH "./data/wiki_plain.txt" // ベンチマーク対象テキストファイルのパス
+
+// タイムアウト設定
+#define BENCHMARK_TIMEOUT_SEC 300           // 1クエリあたりの上限時間（秒）。超えたら打ち切り
