@@ -15,7 +15,6 @@ set -e
 # 引数の解析
 # --------------------------------------------------------
 WIKI_FILE="${1:-./data/wiki_plain.txt}"
-shift || true
 
 if [ ! -f "$WIKI_FILE" ]; then
     echo "[ERROR] Target file not found: $WIKI_FILE"
@@ -23,19 +22,20 @@ if [ ! -f "$WIKI_FILE" ]; then
     exit 1
 fi
 
-MAX_CHARS=$(wc -c < "$WIKI_FILE")
+# UTF-8 文字数を正確に取得（wc -c はバイト数なので Python で計算）
+MAX_CHARS=$(python3 -c "
+with open('$WIKI_FILE', encoding='utf-8', errors='ignore') as f:
+    print(len(f.read()))
+")
 
-if [ "$#" -gt 0 ]; then
-    SIZES=("$@")
-else
-    SIZES=()
-    s=100
-    while [ "$s" -lt "$MAX_CHARS" ]; do
-        SIZES+=("$s")
-        s=$((s * 10))
-    done
-    SIZES+=("$MAX_CHARS")
-fi
+# サイズリスト: 100 → 1000 → 10000 → ... → MAX (10倍刻み)
+SIZES=()
+s=100
+while [ "$s" -lt "$MAX_CHARS" ]; do
+    SIZES+=("$s")
+    s=$((s * 10))
+done
+SIZES+=("$MAX_CHARS")
 
 BINARY="./run_benchmark.asan"
 TIMESTAMP=$(date +%Y%m%d_%H_%M_%S)
