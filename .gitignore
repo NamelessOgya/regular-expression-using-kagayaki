@@ -12,3 +12,4 @@ run.sh
 chokosen-loveti.*
 *.out
 *.csv
+!data/test_cases.csv

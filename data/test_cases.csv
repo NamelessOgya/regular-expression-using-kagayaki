@@ -1,0 +1,11 @@
+正規表現
+the
+[A-Z][a-z]+
+Wikipedia
+a*b
+go*gle
+[0-9]+
+cat|dog
+http
+[a-z]+ing
+a+b*c
