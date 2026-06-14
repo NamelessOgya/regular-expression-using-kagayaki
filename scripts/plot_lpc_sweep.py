@@ -58,23 +58,37 @@ def _safe_filename(regex: str) -> str:
 
 def _plot_one(ax, regex: str,
               lpc_datasets: list[tuple[int, dict]],
+              lpc_dyn_datasets: list[tuple[int, dict]],
               cpu_data: dict | None,
               gpu_line_data: dict | None):
-    """1 つの正規表現について LPC 値ごとの実行時間を描画"""
+    """1 つの正規表現について LPC 値ごとの実行時間を描画（Static vs Dynamic）"""
 
-    # LPC ごとに色を cmap で割り当て
-    n = len(lpc_datasets)
-    colors = cm.plasma(np.linspace(0.15, 0.85, n))
+    # LPC ごとに色を割り当てるため、Static と Dynamic を含むユニークな LPC 値のセットを作成
+    unique_lpcs = sorted(list(set([lpc for lpc, _ in lpc_datasets] + [lpc for lpc, _ in lpc_dyn_datasets])))
+    n = len(unique_lpcs)
+    colors_map = {lpc: color for lpc, color in zip(unique_lpcs, cm.plasma(np.linspace(0.15, 0.85, n)))}
 
     markers = ["o", "s", "^", "D", "v", "P", "X", "*"]
+    markers_map = {lpc: marker for lpc, marker in zip(unique_lpcs, [markers[i % len(markers)] for i in range(n)])}
 
-    for idx, (lpc, data) in enumerate(lpc_datasets):
+    # Static プロット (実線)
+    for lpc, data in lpc_datasets:
         sizes = sorted(data.keys())
         times = [data[s] for s in sizes]
-        color = colors[idx]
-        marker = markers[idx % len(markers)]
+        color = colors_map[lpc]
+        marker = markers_map[lpc]
+        ax.plot(sizes, times, marker=marker, linestyle="-",
+                color=color, label=f"Chunk-Static (N={lpc})",
+                linewidth=1.8, markersize=6, zorder=3)
+
+    # Dynamic プロット (点線)
+    for lpc, data in lpc_dyn_datasets:
+        sizes = sorted(data.keys())
+        times = [data[s] for s in sizes]
+        color = colors_map[lpc]
+        marker = markers_map[lpc]
         ax.plot(sizes, times, marker=marker, linestyle="--",
-                color=color, label=f"Chunk (N={lpc})",
+                color=color, label=f"Chunk-Dynamic (N={lpc})",
                 linewidth=1.8, markersize=6, zorder=3)
 
     # CPU / GPU-Line は参考線として表示
@@ -112,14 +126,17 @@ def _plot_one(ax, regex: str,
 
 
 def plot_all(lpc_datasets: list[tuple[int, dict]],
+             lpc_dyn_datasets: list[tuple[int, dict]],
              cpu_data: dict | None,
              gpu_line_data: dict | None,
              out_dir: str):
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
-    # 全 LPC データから正規表現リストを収集
+    # 全データから正規表現リストを収集
     all_regexes = set()
     for _, d in lpc_datasets:
+        all_regexes.update(d.keys())
+    for _, d in lpc_dyn_datasets:
         all_regexes.update(d.keys())
     if cpu_data:
         all_regexes.update(cpu_data.keys())
@@ -134,14 +151,15 @@ def plot_all(lpc_datasets: list[tuple[int, dict]],
     fig, axes = plt.subplots(rows, cols,
                              figsize=(cols * 7, rows * 4.5),
                              squeeze=False)
-    fig.suptitle("NFA Benchmark: LINES_PER_CHUNK Sweep (GPU Chunk-Parallel)",
+    fig.suptitle("NFA Benchmark: LPC Sweep (GPU Chunk-Parallel Static vs Dynamic)",
                  fontsize=14, fontweight="bold", y=1.002)
 
     for idx, regex in enumerate(all_regexes):
         r, c = divmod(idx, cols)
         ax = axes[r][c]
         per_regex = [(lpc, d.get(regex, {})) for lpc, d in lpc_datasets]
-        _plot_one(ax, regex, per_regex, cpu_data, gpu_line_data)
+        per_regex_dyn = [(lpc, d.get(regex, {})) for lpc, d in lpc_dyn_datasets]
+        _plot_one(ax, regex, per_regex, per_regex_dyn, cpu_data, gpu_line_data)
 
     # 余った軸を非表示
     for idx in range(len(all_regexes), rows * cols):
@@ -158,7 +176,8 @@ def plot_all(lpc_datasets: list[tuple[int, dict]],
     for regex in all_regexes:
         fig, ax = plt.subplots(figsize=(8, 5))
         per_regex = [(lpc, d.get(regex, {})) for lpc, d in lpc_datasets]
-        _plot_one(ax, regex, per_regex, cpu_data, gpu_line_data)
+        per_regex_dyn = [(lpc, d.get(regex, {})) for lpc, d in lpc_dyn_datasets]
+        _plot_one(ax, regex, per_regex, per_regex_dyn, cpu_data, gpu_line_data)
         fig.tight_layout()
         fname = f"lpc_sweep_{_safe_filename(regex)}.png"
         path = os.path.join(out_dir, fname)
@@ -175,27 +194,36 @@ def plot_all(lpc_datasets: list[tuple[int, dict]],
 def main():
     parser = argparse.ArgumentParser(description="Plot LINES_PER_CHUNK sweep results")
     parser.add_argument("--lpc", action="append", default=[],
-                        help="N:path/to/avg.csv  (複数指定可)")
+                        help="N:path/to/avg.csv (Static, 複数指定可)")
+    parser.add_argument("--lpc-dynamic", action="append", default=[],
+                        help="N:path/to/avg.csv (Dynamic, 複数指定可)")
     parser.add_argument("--cpu",      default=None, help="CPU avg.csv")
     parser.add_argument("--gpu-line", default=None, help="GPU Line avg.csv")
     parser.add_argument("--out",      default="./results/lpc_plots", help="出力ディレクトリ")
     args = parser.parse_args()
 
-    if not args.lpc:
-        parser.error("--lpc N:path を少なくとも1つ指定してください")
+    if not args.lpc and not args.lpc_dynamic:
+        parser.error("--lpc N:path または --lpc-dynamic N:path を少なくとも1つ指定してください")
 
     lpc_datasets = []
     for spec in args.lpc:
         n_str, path = spec.split(":", 1)
-        print(f"Loading LPC={n_str:>3} : {path}")
+        print(f"Loading LPC={n_str:>3} (Static) : {path}")
         lpc_datasets.append((int(n_str), load_sweep(path)))
     # N の昇順に並べる
     lpc_datasets.sort(key=lambda x: x[0])
 
+    lpc_dyn_datasets = []
+    for spec in args.lpc_dynamic:
+        n_str, path = spec.split(":", 1)
+        print(f"Loading LPC={n_str:>3} (Dynamic): {path}")
+        lpc_dyn_datasets.append((int(n_str), load_sweep(path)))
+    lpc_dyn_datasets.sort(key=lambda x: x[0])
+
     cpu_data      = load_sweep(args.cpu)      if args.cpu      else None
     gpu_line_data = load_sweep(args.gpu_line) if args.gpu_line else None
 
-    plot_all(lpc_datasets, cpu_data, gpu_line_data, args.out)
+    plot_all(lpc_datasets, lpc_dyn_datasets, cpu_data, gpu_line_data, args.out)
 
 
 if __name__ == "__main__":

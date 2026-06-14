@@ -22,6 +22,8 @@ typedef struct {
     size_t count;            // マッチした総件数（items に格納されていない分も含む）
     size_t stored_count;     // items に実際に保存した件数（= min(count, MAX_STORED_MATCHES)）
     size_t capacity;         // 動的配列の確保容量
+    double cpu_pre_time;     // CPU前処理時間 (秒)
+    double gpu_exec_time;    // GPU実行時間 (秒)
 } SearchResult;
 
 SearchResult create_search_result(void);
@@ -30,6 +32,7 @@ void add_match_item(SearchResult *result, int line_number, const char *content);
 
 SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
 SearchResult gpu_chunk_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
+SearchResult gpu_chunk_dynamic(struct NFA *nfa, const char *text, size_t text_bytes);
 
 SearchResult search_engine_execute(
     const char *strategy,

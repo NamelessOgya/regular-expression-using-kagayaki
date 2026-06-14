@@ -74,7 +74,7 @@ void remove_trailing_newline(char *s) {
  * - output: ファイルに対して "正規表現,検索対象,マッチ結果,実行時間(秒)\n" が書き込まれる
  */
 void write_csv_header(FILE *file) {
-    fprintf(file, "正規表現,検索対象,マッチ行数,マッチ詳細(行番号と行テキスト),実行時間(秒)\n");
+    fprintf(file, "正規表現,検索対象,マッチ行数,マッチ詳細(行番号と行テキスト),実行時間(秒),CPU前処理(秒),GPU実行(秒)\n");
 }
 
 /**
@@ -99,6 +99,8 @@ void generate_csv_filename(char *filename, size_t size) {
         gpu_suffix = "_gpu_line";
     #elif defined(GPU_CHUNK_RUN)
         gpu_suffix = "_gpu_chunk";
+    #elif defined(GPU_CHUNK_DYNAMIC_RUN)
+        gpu_suffix = "_gpu_chunk_dynamic";
     #endif
 
     snprintf(filename, size, OUTPUT_CSV_TEMPLATE, timestamp, gpu_suffix);
@@ -147,6 +149,8 @@ SearchResult create_search_result(void) {
     result.count = 0;
     result.stored_count = 0;
     result.capacity = 0;
+    result.cpu_pre_time = 0.0;
+    result.gpu_exec_time = 0.0;
     return result;
 }
 
@@ -233,6 +237,9 @@ static SearchResult cpu_line_sequential(struct NFA *nfa, const char *text, size_
 SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
 SearchResult gpu_chunk_parallel(struct NFA *nfa, const char *text, size_t text_bytes);
 #endif
+#if defined(GPU_RUN) || defined(GPU_CHUNK_DYNAMIC_RUN)
+SearchResult gpu_chunk_dynamic(struct NFA *nfa, const char *text, size_t text_bytes);
+#endif
 
 SearchResult search_engine_execute(
     const char *strategy,
@@ -251,6 +258,11 @@ SearchResult search_engine_execute(
 #if defined(GPU_CHUNK_RUN) || defined(GPU_RUN)
     if (strcmp(strategy, "gpu_chunk_parallel") == 0) {
         return gpu_chunk_parallel(nfa, text, text_bytes);
+    }
+#endif
+#if defined(GPU_CHUNK_DYNAMIC_RUN) || defined(GPU_RUN)
+    if (strcmp(strategy, "gpu_chunk_dynamic") == 0) {
+        return gpu_chunk_dynamic(nfa, text, text_bytes);
     }
 #endif
     

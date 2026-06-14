@@ -26,12 +26,14 @@ OUT_DIR=""
 N_RUNS=3
 LPC_VALUES=()
 PARSE_LPC=0
+IS_DYNAMIC=0
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --out)  OUT_DIR="$2"; shift 2 ;;
-        --runs) N_RUNS="$2"; shift 2 ;;
-        --lpc)  PARSE_LPC=1; shift ;;
+        --out)     OUT_DIR="$2"; shift 2 ;;
+        --runs)    N_RUNS="$2"; shift 2 ;;
+        --dynamic) IS_DYNAMIC=1; shift ;;
+        --lpc)     PARSE_LPC=1; shift ;;
         *)
             if [ "$PARSE_LPC" -eq 1 ]; then
                 # 数字ならLPC値として追加、それ以外でLPCパース終了
@@ -74,13 +76,18 @@ OPT="-O3"
 # 共有オブジェクト（NFA カーネル、CPU コア）は 1 回だけビルド
 echo ""
 echo "[Build] Shared objects..."
+MACRO="-DGPU_CHUNK_RUN"
+if [ "$IS_DYNAMIC" -eq 1 ]; then
+    MACRO="-DGPU_CHUNK_DYNAMIC_RUN"
+fi
+
 nvcc $OPT -arch=sm_80 $INC -c src/gpu/line_parallel/nfa_gpu_line.cu  -o nfa_gpu_line.o
-gcc  $OPT -DGPU_CHUNK_RUN $INC -c src/cpu/nfa_cpu.c                  -o nfa_cpu_gpu.o
-gcc  $OPT -DGPU_CHUNK_RUN $INC -c src/common/utils.c                 -o utils_gpu.o
-gcc  $OPT -DGPU_CHUNK_RUN $INC -c src/common/re2post.c               -o re2post_gpu.o
-gcc  $OPT -DGPU_CHUNK_RUN $INC -c src/common/post2nfa.c              -o post2nfa_gpu.o
-gcc  $OPT -DGPU_CHUNK_RUN $INC -c app/run_benchmark.c                -o run_benchmark_gpu_chunk.o
-echo "[Build] Shared objects OK"
+gcc  $OPT $MACRO $INC -c src/cpu/nfa_cpu.c                  -o nfa_cpu_gpu.o
+gcc  $OPT $MACRO $INC -c src/common/utils.c                 -o utils_gpu.o
+gcc  $OPT $MACRO $INC -c src/common/re2post.c               -o re2post_gpu.o
+gcc  $OPT $MACRO $INC -c src/common/post2nfa.c              -o post2nfa_gpu.o
+gcc  $OPT $MACRO $INC -c app/run_benchmark.c                -o run_benchmark_gpu_chunk.o
+echo "[Build] Shared objects OK ($MACRO)"
 
 # --------------------------------------------------------
 # LPC 値ごとにビルド＆sweep
@@ -97,14 +104,26 @@ for LPC in "${LPC_VALUES[@]}"; do
         -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu \
         -o nfa_gpu_chunk_lpc${LPC}.o
 
-    BINARY="./run_benchmark_gpu_chunk_lpc${LPC}.out"
+    if [ "$IS_DYNAMIC" -eq 1 ]; then
+        BINARY="./run_benchmark_gpu_chunk_dynamic_lpc${LPC}.out"
+    else
+        BINARY="./run_benchmark_gpu_chunk_lpc${LPC}.out"
+    fi
     nvcc $OPT -arch=sm_80 \
         nfa_gpu_line.o nfa_gpu_chunk_lpc${LPC}.o nfa_cpu_gpu.o \
         utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu_chunk.o \
         -o "$BINARY"
     echo "[Build] OK -> $BINARY"
 
-    LPC_DIR="${OUT_DIR}/lpc_${LPC}"
+    if [ "$IS_DYNAMIC" -eq 1 ]; then
+        LPC_DIR="${OUT_DIR}/lpc_dynamic_${LPC}"
+        STRATEGY_DIR="gpu_chunk_dynamic"
+        CSV_SUFFIX="_gpu_chunk_dynamic"
+    else
+        LPC_DIR="${OUT_DIR}/lpc_${LPC}"
+        STRATEGY_DIR="gpu_chunk"
+        CSV_SUFFIX="_gpu_chunk"
+    fi
     mkdir -p "$LPC_DIR"
 
     # N_RUNS 回 sweep
@@ -112,7 +131,7 @@ for LPC in "${LPC_VALUES[@]}"; do
         echo ""
         echo "  --- LPC=$LPC Run $i / $N_RUNS ---"
         RUN_OUT="${LPC_DIR}/run${i}"
-        mkdir -p "${RUN_OUT}/gpu_chunk"
+        mkdir -p "${RUN_OUT}/${STRATEGY_DIR}"
 
         # ---- sweep: サイズリストを生成 ----
         MAX_CHARS=$(python3 -c "
@@ -127,37 +146,37 @@ with open('$WIKI_FILE', encoding='utf-8', errors='ignore') as f:
         done
         SIZES+=("$MAX_CHARS")
 
-        MANIFEST="${RUN_OUT}/gpu_chunk/manifest.txt"
+        MANIFEST="${RUN_OUT}/${STRATEGY_DIR}/manifest.txt"
         > "$MANIFEST"
         mkdir -p "./results"
 
         for size in "${SIZES[@]}"; do
             echo "    size = ${size} chars"
-            ls ./results/results_*_gpu_chunk.csv 2>/dev/null | sort > /tmp/lpc_before.txt || true
+            ls ./results/results_*${CSV_SUFFIX}.csv 2>/dev/null | sort > /tmp/lpc_before.txt || true
             "$BINARY" "$WIKI_FILE" "$size" || true   # CUDA atexit crash は無視
-            ls ./results/results_*_gpu_chunk.csv 2>/dev/null | sort > /tmp/lpc_after.txt || true
+            ls ./results/results_*${CSV_SUFFIX}.csv 2>/dev/null | sort > /tmp/lpc_after.txt || true
             NEW_FILE=$(comm -13 /tmp/lpc_before.txt /tmp/lpc_after.txt | head -1 || true)
 
             if [ -z "$NEW_FILE" ]; then
-                NEW_FILE=$(ls -t ./results/results_*_gpu_chunk.csv 2>/dev/null | head -1 || true)
+                NEW_FILE=$(ls -t ./results/results_*${CSV_SUFFIX}.csv 2>/dev/null | head -1 || true)
                 echo "    [WARN] Fallback to latest: $NEW_FILE"
             fi
 
             if [ -n "$NEW_FILE" ]; then
-                DEST="${RUN_OUT}/gpu_chunk/result_size${size}.csv"
+                DEST="${RUN_OUT}/${STRATEGY_DIR}/result_size${size}.csv"
                 cp "$NEW_FILE" "$DEST"
                 echo "    ${DEST}:${size}" >> "$MANIFEST"
             fi
         done
 
-        python3 /app/scripts/aggregate_sweep.py "$MANIFEST" "${RUN_OUT}/gpu_chunk/summary.csv"
-        echo "  [LPC=$LPC Run$i] Summary -> ${RUN_OUT}/gpu_chunk/summary.csv"
+        python3 /app/scripts/aggregate_sweep.py "$MANIFEST" "${RUN_OUT}/${STRATEGY_DIR}/summary.csv"
+        echo "  [LPC=$LPC Run$i] Summary -> ${RUN_OUT}/${STRATEGY_DIR}/summary.csv"
     done
 
     # N_RUNS 回の平均
     SUMMARIES=()
     for i in $(seq 1 "$N_RUNS"); do
-        SUMMARIES+=("${LPC_DIR}/run${i}/gpu_chunk/summary.csv")
+        SUMMARIES+=("${LPC_DIR}/run${i}/${STRATEGY_DIR}/summary.csv")
     done
     python3 scripts/average_sweeps.py "${SUMMARIES[@]}" "${LPC_DIR}/avg.csv"
     echo "[LPC=$LPC] Averaged -> ${LPC_DIR}/avg.csv"

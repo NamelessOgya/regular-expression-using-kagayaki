@@ -86,6 +86,8 @@ SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_by
     SearchResult result = create_search_result();
     if (!text || text_bytes == 0) return result;
 
+    double t0 = now_sec();
+
     // 1. テキストを改行 '\n' で走査し、行ごとのオフセットと長さの配列をCPU上に用意します
     std::vector<int> h_off;
     std::vector<int> h_len;
@@ -116,6 +118,8 @@ SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_by
 
     int n_lines = static_cast<int>(h_off.size());
     if (n_lines == 0) return result;
+
+    double t1 = now_sec();
 
     // 2. NFA 状態ポインタを DFS で探索し、フラットな GPUState 配列を作成します
     order.clear();
@@ -186,6 +190,12 @@ SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_by
     cudaFree(d_off);
     cudaFree(d_len);
     cudaFree(d_res);
+
+    double t2 = now_sec();
+    result.cpu_pre_time = t1 - t0;
+    result.gpu_exec_time = t2 - t1;
+    printf("   [Breakdown Line] CPU Preprocess: %.6f sec | GPU Execution: %.6f sec (Total: %.6f sec)\n", 
+           t1 - t0, t2 - t1, t2 - t0);
 
     return result;
 }

@@ -42,7 +42,8 @@ fi
 
 DIR_LINE="${OUT_DIR}/gpu_line"
 DIR_CHUNK="${OUT_DIR}/gpu_chunk"
-mkdir -p "$DIR_LINE" "$DIR_CHUNK"
+DIR_CHUNK_DYN="${OUT_DIR}/gpu_chunk_dynamic"
+mkdir -p "$DIR_LINE" "$DIR_CHUNK" "$DIR_CHUNK_DYN"
 
 # UTF-8 文字数を正確に取得
 MAX_CHARS=$(python3 -c "
@@ -61,6 +62,7 @@ SIZES+=("$MAX_CHARS")
 
 BINARY_LINE="./run_benchmark_gpu_line.out"
 BINARY_CHUNK="./run_benchmark_gpu_chunk.out"
+BINARY_CHUNK_DYN="./run_benchmark_gpu_chunk_dynamic.out"
 
 echo "=================================================="
 echo " GPU Benchmark Sweep (Line-Parallel + Chunk-Parallel)"
@@ -78,13 +80,13 @@ INC="-I./include -I./src/gpu -I./src/gpu/common -I./src/gpu/line_parallel -I./sr
 OPT="-O3"
 
 # 共有オブジェクト（NFA カーネル、CPU コア）
-# utils.c は GPU_LINE_RUN / GPU_CHUNK_RUN 両方を有効にしてビルド（dispatch ブロックを両方コンパイル）
+# utils.c は GPU_LINE_RUN / GPU_CHUNK_RUN / GPU_CHUNK_DYNAMIC_RUN を有効にしてビルド
 nvcc $OPT -arch=sm_80 $INC -c src/gpu/line_parallel/nfa_gpu_line.cu    -o nfa_gpu_line.o
 nvcc $OPT -arch=sm_80 $INC -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu  -o nfa_gpu_chunk.o
-gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/cpu/nfa_cpu.c     -o nfa_cpu_gpu.o
-gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/common/utils.c    -o utils_gpu.o
-gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/common/re2post.c  -o re2post_gpu.o
-gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/common/post2nfa.c -o post2nfa_gpu.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN -DGPU_CHUNK_DYNAMIC_RUN $INC -c src/cpu/nfa_cpu.c     -o nfa_cpu_gpu.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN -DGPU_CHUNK_DYNAMIC_RUN $INC -c src/common/utils.c    -o utils_gpu.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN -DGPU_CHUNK_DYNAMIC_RUN $INC -c src/common/re2post.c  -o re2post_gpu.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN -DGPU_CHUNK_DYNAMIC_RUN $INC -c src/common/post2nfa.c -o post2nfa_gpu.o
 
 # Binary 1: Line-Parallel のみ計測
 gcc  $OPT -DGPU_LINE_RUN $INC -c app/run_benchmark.c -o run_benchmark_gpu_line.o
@@ -101,6 +103,14 @@ nvcc $OPT -arch=sm_80 \
     utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu_chunk.o \
     -o "$BINARY_CHUNK"
 echo "[Build] OK -> $BINARY_CHUNK"
+
+# Binary 3: Chunk-Parallel (Dynamic) のみ計測
+gcc  $OPT -DGPU_CHUNK_DYNAMIC_RUN $INC -c app/run_benchmark.c -o run_benchmark_gpu_chunk_dynamic.o
+nvcc $OPT -arch=sm_80 \
+    nfa_gpu_line.o nfa_gpu_chunk.o nfa_cpu_gpu.o \
+    utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu_chunk_dynamic.o \
+    -o "$BINARY_CHUNK_DYN"
+echo "[Build] OK -> $BINARY_CHUNK_DYN"
 
 # --------------------------------------------------------
 # サイズごとに実行（Line-Parallel）
@@ -171,9 +181,44 @@ done
 python3 /app/scripts/aggregate_sweep.py "$MANIFEST_CHUNK" "${DIR_CHUNK}/summary.csv"
 echo "[GPU Chunk] Summary -> ${DIR_CHUNK}/summary.csv"
 
+# --------------------------------------------------------
+# サイズごとに実行（Chunk-Parallel Dynamic）
+# --------------------------------------------------------
+echo ""
+echo "--- [GPU Chunk-Parallel Dynamic] Sweeping ---"
+
+MANIFEST_CHUNK_DYN="${DIR_CHUNK_DYN}/manifest.txt"
+> "$MANIFEST_CHUNK_DYN"
+
+for size in "${SIZES[@]}"; do
+    echo ""
+    echo "  [GPU Chunk Dynamic] size = ${size} chars"
+
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gchunkdyn_before.txt || true
+    "$BINARY_CHUNK_DYN" "$WIKI_FILE" "$size" || true   # CUDA atexit crash は無視
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gchunkdyn_after.txt || true
+    NEW_FILE=$(comm -13 /tmp/sweep_gchunkdyn_before.txt /tmp/sweep_gchunkdyn_after.txt | head -1 || true)
+
+    if [ -z "$NEW_FILE" ]; then
+        NEW_FILE=$(ls -t ./results/results_*.csv 2>/dev/null | head -1 || true)
+        echo "[WARN] Could not detect new file; using latest: $NEW_FILE"
+    fi
+
+    if [ -n "$NEW_FILE" ]; then
+        DEST="${DIR_CHUNK_DYN}/result_size${size}.csv"
+        cp "$NEW_FILE" "$DEST"
+        echo "${DEST}:${size}" >> "$MANIFEST_CHUNK_DYN"
+        echo "  [GPU Chunk Dynamic] Saved -> $DEST"
+    fi
+done
+
+python3 /app/scripts/aggregate_sweep.py "$MANIFEST_CHUNK_DYN" "${DIR_CHUNK_DYN}/summary.csv"
+echo "[GPU Chunk Dynamic] Summary -> ${DIR_CHUNK_DYN}/summary.csv"
+
 echo ""
 echo "=================================================="
 echo " GPU Sweep complete!"
-echo "  Line  : ${DIR_LINE}/summary.csv"
-echo "  Chunk : ${DIR_CHUNK}/summary.csv"
+echo "  Line    : ${DIR_LINE}/summary.csv"
+echo "  Chunk   : ${DIR_CHUNK}/summary.csv"
+echo "  Dynamic : ${DIR_CHUNK_DYN}/summary.csv"
 echo "=================================================="

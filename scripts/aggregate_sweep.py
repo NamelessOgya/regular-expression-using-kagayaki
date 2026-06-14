@@ -31,12 +31,22 @@ with open(manifest_path) as f:
                 regex       = row[0].strip().rstrip("\n\r")
                 match_count = row[2].strip()
                 exec_time   = row[4].strip()
+                
+                # Check for 7 columns (new format)
+                if len(row) >= 7:
+                    cpu_pre_time = row[5].strip()
+                    gpu_exec_time = row[6].strip()
+                else:
+                    # Fallback for old format (cpu_pre_time = 0.0, gpu_exec_time = exec_time)
+                    cpu_pre_time = "0.000000"
+                    gpu_exec_time = exec_time
+                
                 note = "TIMEOUT" if exec_time == "300.000000" else ""
-                rows.append([regex, size, match_count, exec_time, note])
+                rows.append([regex, size, match_count, exec_time, cpu_pre_time, gpu_exec_time, note])
 
 with open(summary_path, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
-    writer.writerow(["正規表現", "文字数", "マッチ行数", "実行時間(秒)", "備考"])
+    writer.writerow(["正規表現", "文字数", "マッチ行数", "実行時間(秒)", "CPU前処理(秒)", "GPU実行(秒)", "備考"])
     writer.writerows(rows)
 
 print(f"[Summary] {len(rows)} rows -> {summary_path}")

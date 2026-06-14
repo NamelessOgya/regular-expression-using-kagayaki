@@ -31,7 +31,7 @@ set -e
 # 引数の解析
 # --------------------------------------------------------
 CPU_ONLY=0
-SKIP_LPC=0
+SKIP_LPC=1
 N_RUNS=3
 WIKI_FILE="./data/wiki_plain.txt"
 # LPC sweep 値: 1=Line-Parallel相当, 8=現在のデフォルト, その先も比較
@@ -53,7 +53,7 @@ fi
 
 TIMESTAMP=$(date +%Y%m%d_%H_%M_%S)
 RUN_DIR="./results/run_${TIMESTAMP}"
-mkdir -p "$RUN_DIR/cpu" "$RUN_DIR/gpu_line" "$RUN_DIR/gpu_chunk" "$RUN_DIR/plots" "$RUN_DIR/lpc_sweep"
+mkdir -p "$RUN_DIR/cpu" "$RUN_DIR/gpu_line" "$RUN_DIR/gpu_chunk" "$RUN_DIR/gpu_chunk_dynamic" "$RUN_DIR/plots" "$RUN_DIR/lpc_sweep"
 
 echo "=========================================="
 echo " run_all.sh"
@@ -87,12 +87,12 @@ python3 scripts/average_sweeps.py "${CPU_SUMMARIES[@]}" "$RUN_DIR/cpu/avg.csv"
 # --------------------------------------------------------
 if [ "$CPU_ONLY" -eq 0 ]; then
     echo ""
-    echo ">>> [2/5] GPU Sweeps (Line-Parallel + Chunk-Parallel, x${N_RUNS})"
+    echo ">>> [2/5] GPU Sweeps (Line-Parallel + Chunk-Parallel + Dynamic, x${N_RUNS})"
 
     for i in $(seq 1 "$N_RUNS"); do
         echo ""
         echo "  --- GPU Run $i / $N_RUNS ---"
-        # run_sweep_gpu.sh は OUT_DIR/gpu_line/ と OUT_DIR/gpu_chunk/ に出力する
+        # run_sweep_gpu.sh は OUT_DIR/gpu_line/, OUT_DIR/gpu_chunk/, OUT_DIR/gpu_chunk_dynamic/ に出力する
         bash run_sweep_gpu.sh "$WIKI_FILE" --out "$RUN_DIR/gpu/run${i}"
     done
 
@@ -114,6 +114,15 @@ if [ "$CPU_ONLY" -eq 0 ]; then
     done
     python3 scripts/average_sweeps.py "${GPU_CHUNK_SUMMARIES[@]}" "$RUN_DIR/gpu_chunk/avg.csv"
 
+    # GPU Chunk Dynamic の平均
+    echo ""
+    echo "  --- GPU Chunk Dynamic: Averaging ${N_RUNS} runs ---"
+    GPU_CHUNK_DYN_SUMMARIES=()
+    for i in $(seq 1 "$N_RUNS"); do
+        GPU_CHUNK_DYN_SUMMARIES+=("$RUN_DIR/gpu/run${i}/gpu_chunk_dynamic/summary.csv")
+    done
+    python3 scripts/average_sweeps.py "${GPU_CHUNK_DYN_SUMMARIES[@]}" "$RUN_DIR/gpu_chunk_dynamic/avg.csv"
+
 else
     echo ""
     echo ">>> [2/5] GPU Sweeps: SKIPPED (--cpu-only)"
@@ -131,9 +140,17 @@ if [ "$CPU_ONLY" -eq 0 ] && [ "$SKIP_LPC" -eq 0 ]; then
         LPC_ARGS="$LPC_ARGS $lpc"
     done
 
+    echo "--- Running Static LPC Sweep ---"
     bash run_lpc_sweep.sh "$WIKI_FILE" \
         --out "$RUN_DIR/lpc_sweep" \
         --runs "$N_RUNS" \
+        --lpc $LPC_ARGS
+
+    echo "--- Running Dynamic LPC Sweep ---"
+    bash run_lpc_sweep.sh "$WIKI_FILE" \
+        --out "$RUN_DIR/lpc_sweep" \
+        --runs "$N_RUNS" \
+        --dynamic \
         --lpc $LPC_ARGS
 else
     echo ""
@@ -154,6 +171,9 @@ if [ "$CPU_ONLY" -eq 0 ]; then
     if [ -f "$RUN_DIR/gpu_chunk/avg.csv" ]; then
         PLOT_ARGS="$PLOT_ARGS --gpu-chunk $RUN_DIR/gpu_chunk/avg.csv"
     fi
+    if [ -f "$RUN_DIR/gpu_chunk_dynamic/avg.csv" ]; then
+        PLOT_ARGS="$PLOT_ARGS --gpu-chunk-dynamic $RUN_DIR/gpu_chunk_dynamic/avg.csv"
+    fi
 fi
 
 python3 scripts/plot_benchmark.py $PLOT_ARGS
@@ -169,13 +189,17 @@ if [ "$CPU_ONLY" -eq 0 ] && [ "$SKIP_LPC" -eq 0 ]; then
     if [ -f "$RUN_DIR/cpu/avg.csv" ]; then
         LPC_PLOT_ARGS="$LPC_PLOT_ARGS --cpu $RUN_DIR/cpu/avg.csv"
     fi
-    if [ -f "$RUN_DIR/gpu_line/avg.csv" ]; then
+    if [ "$RUN_DIR/gpu_line/avg.csv" ]; then
         LPC_PLOT_ARGS="$LPC_PLOT_ARGS --gpu-line $RUN_DIR/gpu_line/avg.csv"
     fi
     for lpc in "${LPC_VALUES[@]}"; do
         AVG="$RUN_DIR/lpc_sweep/lpc_${lpc}/avg.csv"
         if [ -f "$AVG" ]; then
             LPC_PLOT_ARGS="$LPC_PLOT_ARGS --lpc ${lpc}:${AVG}"
+        fi
+        AVG_DYN="$RUN_DIR/lpc_sweep/lpc_dynamic_${lpc}/avg.csv"
+        if [ -f "$AVG_DYN" ]; then
+            LPC_PLOT_ARGS="$LPC_PLOT_ARGS --lpc-dynamic ${lpc}:${AVG_DYN}"
         fi
     done
 

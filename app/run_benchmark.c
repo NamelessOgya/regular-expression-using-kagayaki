@@ -215,6 +215,11 @@ int main(int argc, char *argv[]) {
             double start = now_sec();
             result = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
             case_time = now_sec() - start;
+#elif defined(GPU_CHUNK_DYNAMIC_RUN)
+            printf("  [GPU Chunk Dynamic] Running Dynamic Chunk-Parallel Strategy...\n");
+            double start = now_sec();
+            result = search_engine_execute("gpu_chunk_dynamic", nfa, target_subset, subset_bytes);
+            case_time = now_sec() - start;
 #elif defined(GPU_RUN)
             printf("  [GPU] Running Simple Line-Parallel Strategy...\n");
             double start1 = now_sec();
@@ -225,9 +230,16 @@ int main(int argc, char *argv[]) {
             double start2 = now_sec();
             SearchResult result_chunk = search_engine_execute("gpu_chunk_parallel", nfa, target_subset, subset_bytes);
             double chunk_time = now_sec() - start2;
-            printf("  [GPU Comparison] Line-Parallel: %.6f sec | Chunk-Parallel: %.6f sec (Chunk matched: %zu)\n",
-                   case_time, chunk_time, result_chunk.count);
+
+            printf("  [GPU] Running Dynamic Chunk-Parallel Strategy...\n");
+            double start3 = now_sec();
+            SearchResult result_chunk_dyn = search_engine_execute("gpu_chunk_dynamic", nfa, target_subset, subset_bytes);
+            double chunk_dyn_time = now_sec() - start3;
+
+            printf("  [GPU Comparison] Line-Parallel: %.6f sec | Chunk-Static: %.6f sec | Chunk-Dynamic: %.6f sec (Static matched: %zu, Dynamic matched: %zu)\n",
+                   case_time, chunk_time, chunk_dyn_time, result_chunk.count, result_chunk_dyn.count);
             free_search_result(&result_chunk);
+            free_search_result(&result_chunk_dyn);
 #else
             case_start = now_sec();
             result = search_engine_execute("cpu_line_sequential", nfa, target_subset, subset_bytes);
@@ -333,11 +345,11 @@ int main(int argc, char *argv[]) {
 
         // CSVへの書き出し（タイムアウト時はマッチ数を "-" で記録）
         if (did_timeout) {
-            fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"-\",\"%s\",%.6f\n",
-                    regex, char_count, csv_details, case_time);
+            fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"-\",\"%s\",%.6f,%.6f,%.6f\n",
+                    regex, char_count, csv_details, case_time, 0.0, case_time);
         } else {
-            fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"%zu\",\"%s\",%.6f\n",
-                    regex, char_count, result.count, csv_details, case_time);
+            fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"%zu\",\"%s\",%.6f,%.6f,%.6f\n",
+                    regex, char_count, result.count, csv_details, case_time, result.cpu_pre_time, result.gpu_exec_time);
         }
         fflush(csv_out);  // クラッシュ時にもディスクへ確実に書き出す
 
