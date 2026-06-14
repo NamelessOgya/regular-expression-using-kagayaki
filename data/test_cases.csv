@@ -1,11 +1,32 @@
 正規表現
 the
-[A-Z][a-z]+
+(The|An|In|Of)
 Wikipedia
 a*b
 go*gle
-[0-9]+
+(one|two|three|four|five)
 cat|dog
 http
-[a-z]+ing
+.+ing
 a+b*c
+the .+
+.+ of .+
+(19|20).+
+http.+
+.+ the .+
+http.+wiki
+(the|a|an) .+
+.+er
+.+ and .+
+.+ly
+(the)
+(the|and)
+(the|and|for)
+(the|and|for|are)
+(the|and|for|are|but)
+(the|and|for|are|but|not)
+(the|and|for|are|but|not|his)
+(the|and|for|are|but|not|his|has)
+(the|and|for|are|but|not|his|has|was)
+(the|and|for|are|but|not|his|has|was|can)
+

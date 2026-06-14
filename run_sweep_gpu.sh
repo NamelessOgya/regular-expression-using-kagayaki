@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
 # =============================================================
-# run_sweep_gpu.sh
-# GPU版 ベンチマークスイープスクリプト
-# 正規表現 × テキスト文字数のグリッドで GPU ベンチマークを実行し、
-# 結果を results/sweep_gpu_<timestamp>.csv にまとめる。
+# run_sweep_gpu.sh  (GPU版)
+# GPU Line-Parallel と GPU Chunk-Parallel の2種を1回分スイープする。
 #
 # 使い方:
-#   ./run_sweep_gpu.sh                        # wiki_plain.txt を対象に全サイズ実行
-#   ./run_sweep_gpu.sh ./data/wiki_plain.txt  # ファイル指定
+#   ./run_sweep_gpu.sh                                  # デフォルト出力先
+#   ./run_sweep_gpu.sh ./data/wiki_plain.txt --out ./results/run_xxx/gpu/run1
+#
+# 出力構造:
+#   OUT_DIR/
+#     gpu_line/   ← GPU Line-Parallel の結果
+#       result_sizeN.csv, manifest.txt, summary.csv
+#     gpu_chunk/  ← GPU Chunk-Parallel の結果
+#       result_sizeN.csv, manifest.txt, summary.csv
 # =============================================================
 set -e
 
 # --------------------------------------------------------
 # 引数の解析
 # --------------------------------------------------------
-WIKI_FILE="${1:-./data/wiki_plain.txt}"
+WIKI_FILE="./data/wiki_plain.txt"
+OUT_DIR=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --out) OUT_DIR="$2"; shift 2 ;;
+        *) WIKI_FILE="$1"; shift ;;
+    esac
+done
 
 if [ ! -f "$WIKI_FILE" ]; then
     echo "[ERROR] Target file not found: $WIKI_FILE"
@@ -22,13 +35,22 @@ if [ ! -f "$WIKI_FILE" ]; then
     exit 1
 fi
 
+TIMESTAMP=$(date +%Y%m%d_%H_%M_%S)
+if [ -z "$OUT_DIR" ]; then
+    OUT_DIR="./results/sweep_gpu_${TIMESTAMP}"
+fi
+
+DIR_LINE="${OUT_DIR}/gpu_line"
+DIR_CHUNK="${OUT_DIR}/gpu_chunk"
+mkdir -p "$DIR_LINE" "$DIR_CHUNK"
+
 # UTF-8 文字数を正確に取得
 MAX_CHARS=$(python3 -c "
 with open('$WIKI_FILE', encoding='utf-8', errors='ignore') as f:
     print(len(f.read()))
 ")
 
-# サイズリスト: 100 → 1000 → 10000 → ... → MAX (10倍刻み)
+# サイズリスト: 100 → 1000 → ... → MAX (10倍刻み)
 SIZES=()
 s=100
 while [ "$s" -lt "$MAX_CHARS" ]; do
@@ -37,130 +59,121 @@ while [ "$s" -lt "$MAX_CHARS" ]; do
 done
 SIZES+=("$MAX_CHARS")
 
-BINARY="./run_benchmark_gpu.out"
-TIMESTAMP=$(date +%Y%m%d_%H_%M_%S)
-SWEEP_DIR="./results/sweep_gpu_${TIMESTAMP}"
-SUMMARY="./results/sweep_gpu_${TIMESTAMP}.csv"
-MANIFEST="${SWEEP_DIR}/manifest.txt"
-mkdir -p "$SWEEP_DIR"
+BINARY_LINE="./run_benchmark_gpu_line.out"
+BINARY_CHUNK="./run_benchmark_gpu_chunk.out"
 
 echo "=================================================="
-echo " GPU Benchmark Sweep"
+echo " GPU Benchmark Sweep (Line-Parallel + Chunk-Parallel)"
 echo " Target : $WIKI_FILE  (~${MAX_CHARS} chars)"
 echo " Sizes  : ${SIZES[*]}"
-echo " Summary: $SUMMARY"
+echo " Out    : $OUT_DIR"
 echo "=================================================="
 
 # --------------------------------------------------------
-# ビルド (GPU 比較モード: CPU + GPU Line + GPU Chunk)
+# ビルド
 # --------------------------------------------------------
 echo ""
-echo "[Build] Compiling GPU benchmark binary..."
+echo "[Build] Compiling GPU benchmark binaries..."
 INC="-I./include -I./src/gpu -I./src/gpu/common -I./src/gpu/line_parallel -I./src/gpu/chunk_parallel"
 OPT="-O3"
 
-nvcc $OPT -arch=sm_80 -DGPU_RUN $INC -c src/gpu/line_parallel/nfa_gpu_line.cu   -o nfa_gpu_line.o
-nvcc $OPT -arch=sm_80 -DGPU_RUN $INC -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu -o nfa_gpu_chunk.o
-gcc  $OPT             -DGPU_RUN $INC -c src/cpu/nfa_cpu.c                        -o nfa_cpu_gpu.o
-gcc  $OPT             -DGPU_RUN $INC -c src/common/utils.c                       -o utils_gpu.o
-gcc  $OPT             -DGPU_RUN $INC -c src/common/re2post.c                     -o re2post_gpu.o
-gcc  $OPT             -DGPU_RUN $INC -c src/common/post2nfa.c                    -o post2nfa_gpu.o
-gcc  $OPT             -DGPU_RUN $INC -c app/run_benchmark.c                      -o run_benchmark_gpu.o
+# 共有オブジェクト（NFA カーネル、CPU コア）
+# utils.c は GPU_LINE_RUN / GPU_CHUNK_RUN 両方を有効にしてビルド（dispatch ブロックを両方コンパイル）
+nvcc $OPT -arch=sm_80 $INC -c src/gpu/line_parallel/nfa_gpu_line.cu    -o nfa_gpu_line.o
+nvcc $OPT -arch=sm_80 $INC -c src/gpu/chunk_parallel/nfa_gpu_chunk.cu  -o nfa_gpu_chunk.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/cpu/nfa_cpu.c     -o nfa_cpu_gpu.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/common/utils.c    -o utils_gpu.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/common/re2post.c  -o re2post_gpu.o
+gcc  $OPT -DGPU_LINE_RUN -DGPU_CHUNK_RUN $INC -c src/common/post2nfa.c -o post2nfa_gpu.o
+
+# Binary 1: Line-Parallel のみ計測
+gcc  $OPT -DGPU_LINE_RUN $INC -c app/run_benchmark.c -o run_benchmark_gpu_line.o
 nvcc $OPT -arch=sm_80 \
     nfa_gpu_line.o nfa_gpu_chunk.o nfa_cpu_gpu.o \
-    utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu.o \
-    -o "$BINARY"
-echo "[Build] OK -> $BINARY"
+    utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu_line.o \
+    -o "$BINARY_LINE"
+echo "[Build] OK -> $BINARY_LINE"
+
+# Binary 2: Chunk-Parallel のみ計測
+gcc  $OPT -DGPU_CHUNK_RUN $INC -c app/run_benchmark.c -o run_benchmark_gpu_chunk.o
+nvcc $OPT -arch=sm_80 \
+    nfa_gpu_line.o nfa_gpu_chunk.o nfa_cpu_gpu.o \
+    utils_gpu.o re2post_gpu.o post2nfa_gpu.o run_benchmark_gpu_chunk.o \
+    -o "$BINARY_CHUNK"
+echo "[Build] OK -> $BINARY_CHUNK"
 
 # --------------------------------------------------------
-# サイズごとに実行
+# サイズごとに実行（Line-Parallel）
 # --------------------------------------------------------
+echo ""
+echo "--- [GPU Line-Parallel] Sweeping ---"
+mkdir -p "./results"
+
+MANIFEST_LINE="${DIR_LINE}/manifest.txt"
+> "$MANIFEST_LINE"
+
 for size in "${SIZES[@]}"; do
     echo ""
-    echo "----------------------------------------------"
-    echo " [RUN] size = ${size} chars"
-    echo "----------------------------------------------"
+    echo "  [GPU Line] size = ${size} chars"
 
-    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gpu_before.txt || true
-
-    "$BINARY" "$WIKI_FILE" "$size"
-
-    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gpu_after.txt || true
-    NEW_FILE=$(comm -13 /tmp/sweep_gpu_before.txt /tmp/sweep_gpu_after.txt | head -1 || true)
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gline_before.txt || true
+    "$BINARY_LINE" "$WIKI_FILE" "$size" || true   # CUDA atexit crash は無視
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gline_after.txt || true
+    NEW_FILE=$(comm -13 /tmp/sweep_gline_before.txt /tmp/sweep_gline_after.txt | head -1 || true)
 
     if [ -z "$NEW_FILE" ]; then
         NEW_FILE=$(ls -t ./results/results_*.csv 2>/dev/null | head -1 || true)
-        echo "[WARN] Could not detect new file by diff; using latest: $NEW_FILE"
+        echo "[WARN] Could not detect new file; using latest: $NEW_FILE"
     fi
 
     if [ -n "$NEW_FILE" ]; then
-        DEST="${SWEEP_DIR}/result_size${size}.csv"
+        DEST="${DIR_LINE}/result_size${size}.csv"
         cp "$NEW_FILE" "$DEST"
-        echo "${DEST}:${size}" >> "$MANIFEST"
-        echo "[RUN] Saved -> $DEST"
-    else
-        echo "[ERROR] No result CSV found for size=${size}"
+        echo "${DEST}:${size}" >> "$MANIFEST_LINE"
+        echo "  [GPU Line] Saved -> $DEST"
     fi
 done
 
+python3 /app/scripts/aggregate_sweep.py "$MANIFEST_LINE" "${DIR_LINE}/summary.csv"
+echo "[GPU Line] Summary -> ${DIR_LINE}/summary.csv"
+
 # --------------------------------------------------------
-# サマリー CSV の生成 (Python)
+# サイズごとに実行（Chunk-Parallel）
 # --------------------------------------------------------
 echo ""
-echo "[Summary] Aggregating results from $SWEEP_DIR ..."
+echo "--- [GPU Chunk-Parallel] Sweeping ---"
 
-python3 - "$MANIFEST" "$SUMMARY" << 'PYEOF'
-import csv, os, sys
+MANIFEST_CHUNK="${DIR_CHUNK}/manifest.txt"
+> "$MANIFEST_CHUNK"
 
-csv.field_size_limit(sys.maxsize)  # マッチ詳細フィールドが大きい場合の上限解除
-manifest_path = sys.argv[1]
-summary_path  = sys.argv[2]
+for size in "${SIZES[@]}"; do
+    echo ""
+    echo "  [GPU Chunk] size = ${size} chars"
 
-rows = []
-with open(manifest_path) as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        colon_idx = line.rfind(":")
-        filepath = line[:colon_idx]
-        size = int(line[colon_idx + 1:])
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gchunk_before.txt || true
+    "$BINARY_CHUNK" "$WIKI_FILE" "$size" || true   # CUDA atexit crash は無視
+    ls ./results/results_*.csv 2>/dev/null | sort > /tmp/sweep_gchunk_after.txt || true
+    NEW_FILE=$(comm -13 /tmp/sweep_gchunk_before.txt /tmp/sweep_gchunk_after.txt | head -1 || true)
 
-        if not os.path.exists(filepath):
-            print(f"[WARN] File not found: {filepath}", file=sys.stderr)
-            continue
+    if [ -z "$NEW_FILE" ]; then
+        NEW_FILE=$(ls -t ./results/results_*.csv 2>/dev/null | head -1 || true)
+        echo "[WARN] Could not detect new file; using latest: $NEW_FILE"
+    fi
 
-        with open(filepath, newline="", encoding="utf-8") as cf:
-            reader = csv.reader(cf)
-            next(reader)  # ヘッダーをスキップ
-            for row in reader:
-                if len(row) < 5:
-                    continue
-                regex       = row[0].strip().rstrip("\n\r")
-                match_count = row[2].strip()
-                exec_time   = row[4].strip()
-                note = "TIMEOUT" if exec_time == "300.000000" else ""
-                rows.append([regex, size, match_count, exec_time, note])
+    if [ -n "$NEW_FILE" ]; then
+        DEST="${DIR_CHUNK}/result_size${size}.csv"
+        cp "$NEW_FILE" "$DEST"
+        echo "${DEST}:${size}" >> "$MANIFEST_CHUNK"
+        echo "  [GPU Chunk] Saved -> $DEST"
+    fi
+done
 
-with open(summary_path, "w", newline="", encoding="utf-8") as f:
-    writer = csv.writer(f)
-    writer.writerow(["正規表現", "文字数", "マッチ行数", "実行時間(秒)", "備考"])
-    writer.writerows(rows)
-
-print(f"[Summary] {len(rows)} rows -> {summary_path}")
-PYEOF
+python3 /app/scripts/aggregate_sweep.py "$MANIFEST_CHUNK" "${DIR_CHUNK}/summary.csv"
+echo "[GPU Chunk] Summary -> ${DIR_CHUNK}/summary.csv"
 
 echo ""
 echo "=================================================="
 echo " GPU Sweep complete!"
-echo " Raw CSVs : $SWEEP_DIR/"
-echo " Summary  : $SUMMARY"
+echo "  Line  : ${DIR_LINE}/summary.csv"
+echo "  Chunk : ${DIR_CHUNK}/summary.csv"
 echo "=================================================="
-echo ""
-echo "--- Preview (first 20 rows) ---"
-head -21 "$SUMMARY"
-echo ""
-echo "--- グラフ生成 ---"
-echo "python3 scripts/plot_benchmark.py \\"
-echo "    --cpu results/sweep_<CPU_TIMESTAMP>.csv \\"
-echo "    --gpu $SUMMARY"

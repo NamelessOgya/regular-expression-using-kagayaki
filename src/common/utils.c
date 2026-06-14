@@ -93,8 +93,12 @@ void generate_csv_filename(char *filename, size_t size) {
     get_jst_timestamp(timestamp, sizeof(timestamp));
 
     const char *gpu_suffix = "";
-    #ifdef GPU_RUN
+    #if defined(GPU_RUN)
         gpu_suffix = "_gpu";
+    #elif defined(GPU_LINE_RUN)
+        gpu_suffix = "_gpu_line";
+    #elif defined(GPU_CHUNK_RUN)
+        gpu_suffix = "_gpu_chunk";
     #endif
 
     snprintf(filename, size, OUTPUT_CSV_TEMPLATE, timestamp, gpu_suffix);
@@ -141,24 +145,28 @@ SearchResult create_search_result(void) {
     SearchResult result;
     result.items = NULL;
     result.count = 0;
+    result.stored_count = 0;
     result.capacity = 0;
     return result;
 }
 
 void free_search_result(SearchResult *result) {
     if (result->items) {
-        for (size_t i = 0; i < result->count; i++) {
+        // stored_count までしか有効な items がないので、そこまでのみ解放
+        for (size_t i = 0; i < result->stored_count; i++) {
             free(result->items[i].line_content);
         }
         free(result->items);
         result->items = NULL;
     }
     result->count = 0;
+    result->stored_count = 0;
     result->capacity = 0;
 }
 
 void add_match_item(SearchResult *result, int line_number, const char *content) {
-    if (result->count >= result->capacity) {
+    // stored_count で容量チェック（count は総件数なので使わない）
+    if (result->stored_count >= result->capacity) {
         size_t new_capacity = result->capacity == 0 ? 4 : result->capacity * 2;
         MatchItem *new_items = realloc(result->items, new_capacity * sizeof(MatchItem));
         if (!new_items) {
@@ -168,12 +176,13 @@ void add_match_item(SearchResult *result, int line_number, const char *content) 
         result->items = new_items;
         result->capacity = new_capacity;
     }
-    result->items[result->count].line_number = line_number;
-    result->items[result->count].line_content = strdup(content);
-    if (!result->items[result->count].line_content) {
+    result->items[result->stored_count].line_number = line_number;
+    result->items[result->stored_count].line_content = strdup(content);
+    if (!result->items[result->stored_count].line_content) {
         perror("add_match_item strdup failed");
         exit(EXIT_FAILURE);
     }
+    result->stored_count++;
     result->count++;
 }
 
@@ -203,7 +212,13 @@ static SearchResult cpu_line_sequential(struct NFA *nfa, const char *text, size_
 
         // 各行に対して NFA 検索
         if (nfa_search(nfa, current_line)) {
-            add_match_item(&result, line_number, current_line);
+            if (result.count < MAX_STORED_MATCHES) {
+                // 最初の MAX_STORED_MATCHES 件は内容ごと保存
+                add_match_item(&result, line_number, current_line);
+            } else {
+                // 以降はカウントのみ（strdup しない → O(n²) 問題を回避）
+                result.count++;
+            }
         }
 
         current_line = next_line;

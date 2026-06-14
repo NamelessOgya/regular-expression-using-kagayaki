@@ -32,6 +32,9 @@ char regex[MAX_LINE_LENGTH] = "";
 char target[MAX_LINE_LENGTH]; //正規表現マッチの長大な検索対象文字列
 
 int main(int argc, char *argv[]) {
+    // stdout を常にライン・バッファに設定 (リダイレクト先が非端末でも安全)
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
     // デフォルトの設定
     const char *text_path = TARGET_TEXT_PATH;
     size_t subset_char_limit = DEFAULT_SUBSET_SIZE;
@@ -147,7 +150,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char output_csv[50];
+    char output_csv[80];
     generate_csv_filename(output_csv, sizeof output_csv);
     
     FILE *csv_out = fopen(output_csv, "w");
@@ -171,8 +174,19 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "[Fatal Error] Benchmark aborted: Failure to parse CSV line.\n");
             exit(EXIT_FAILURE);
         }
-        
+
+        // fgets は行末の '\n' を含むため、正規表現文字列から除去する
+        // ('\r\n' (Windows) にも対応)
+        remove_trailing_newline(regex);
+        {
+            size_t rlen = strlen(regex);
+            if (rlen > 0 && regex[rlen - 1] == '\r') regex[rlen - 1] = '\0';
+        }
+
         printf("regex: %s\n", regex);
+
+        // 空のパターンはスキップ（末尾空行対策）
+        if (strlen(regex) == 0) continue;
 
         // ============================================================
         // タイムアウト付き実行
@@ -247,7 +261,11 @@ int main(int argc, char *argv[]) {
             csv_details[0] = '\0';
             size_t details_len = 0;
 
-            for (size_t i = 0; i < result.count; i++) {
+            // 最初の MAX_STORED_MATCHES 件のみ内容を出力（それ以降は件数のみ）
+            size_t display_count = result.count < MAX_STORED_MATCHES
+                                   ? result.count : MAX_STORED_MATCHES;
+
+            for (size_t i = 0; i < display_count; i++) {
                 char temp_match[16384];
                 int header_len = snprintf(temp_match, sizeof(temp_match), "Line %d: ", result.items[i].line_number);
                 int dest_idx = header_len;
@@ -278,6 +296,20 @@ int main(int argc, char *argv[]) {
                 strcat(csv_details, temp_match);
                 details_len += temp_len;
             }
+
+            // 残りの件数を末尾に追記
+            if (result.count > MAX_STORED_MATCHES) {
+                char more_buf[64];
+                snprintf(more_buf, sizeof(more_buf), " | ... and %zu more",
+                         result.count - MAX_STORED_MATCHES);
+                size_t more_len = strlen(more_buf);
+                size_t needed = details_len + more_len + 1;
+                if (needed > details_capacity) {
+                    csv_details = realloc(csv_details, needed);
+                    if (!csv_details) { perror("realloc more_buf"); exit(EXIT_FAILURE); }
+                }
+                strcat(csv_details, more_buf);
+            }
         } else {
             csv_details = strdup("No match");
             if (!csv_details) {
@@ -307,6 +339,7 @@ int main(int argc, char *argv[]) {
             fprintf(csv_out, "\"%s\",\"[Subset %zu chars]\",\"%zu\",\"%s\",%.6f\n",
                     regex, char_count, result.count, csv_details, case_time);
         }
+        fflush(csv_out);  // クラッシュ時にもディスクへ確実に書き出す
 
         // メモリ解放（タイムアウト時は SearchResult が未初期化のため free しない）
         free(csv_details);

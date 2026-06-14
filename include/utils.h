@@ -18,9 +18,10 @@ typedef struct {
 } MatchItem;
 
 typedef struct {
-    MatchItem *items;    // マッチ項目的動的配列
-    size_t count;        // マッチした総件数
-    size_t capacity;     // 動的配列の確保容量
+    MatchItem *items;        // マッチ項目の動的配列（最初の MAX_STORED_MATCHES 件のみ）
+    size_t count;            // マッチした総件数（items に格納されていない分も含む）
+    size_t stored_count;     // items に実際に保存した件数（= min(count, MAX_STORED_MATCHES)）
+    size_t capacity;         // 動的配列の確保容量
 } SearchResult;
 
 SearchResult create_search_result(void);

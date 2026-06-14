@@ -13,3 +13,6 @@ chokosen-loveti.*
 *.out
 *.csv
 !data/test_cases.csv
+
+*.o
+*.asan

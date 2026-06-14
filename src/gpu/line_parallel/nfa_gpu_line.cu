@@ -167,13 +167,16 @@ SearchResult gpu_line_parallel(struct NFA *nfa, const char *text, size_t text_by
     // 6. マッチした行を SearchResult に詰め込みます
     for (int i = 0; i < n_lines; ++i) {
         if (h_res[i]) {
-            int len = h_len[i];
-            char* line_buf = (char*)malloc(len + 1);
-            memcpy(line_buf, line_ptrs[i], len);
-            line_buf[len] = '\0';
-            
-            add_match_item(&result, i + 1, line_buf);
-            free(line_buf);
+            if (result.stored_count < MAX_STORED_MATCHES) {
+                int len = h_len[i];
+                char* line_buf = (char*)malloc(len + 1);
+                memcpy(line_buf, line_ptrs[i], len);
+                line_buf[len] = '\0';
+                add_match_item(&result, i + 1, line_buf);
+                free(line_buf);
+            } else {
+                result.count++;  // 内容は保存しない、カウントのみ
+            }
         }
     }
 

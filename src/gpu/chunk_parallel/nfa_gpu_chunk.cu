@@ -1,138 +1,129 @@
-/* nfa_gpu_chunk.cu */
+/* nfa_gpu_chunk.cu - 行グループ並列版 */
+/*
+ * 1スレッド = 複数行（LINES_PER_CHUNK 行）を担当し、チャンク内の全行を
+ * 順番に NFA マッチする。
+ *
+ * line_parallel との違い:
+ *   line_parallel  : 1スレッド / 1行   → n_lines スレッド（最大並列度）
+ *   chunk_parallel : 1スレッド / N行   → n_lines/N スレッド（スレッド数削減、逐次量増加）
+ *
+ * この粒度の違いが GPU の性能にどう影響するかを比較するのがこの実装の研究的意義。
+ */
 #include "nfa_gpu_common.h"
 #include <algorithm>
 
+/* 1スレッドが担当する行数 (コンパイル時に -DLINES_PER_CHUNK=N で上書き可能) */
+#ifndef LINES_PER_CHUNK
+#define LINES_PER_CHUNK 8
+#endif
+
 /**
- * テキストを一律の固定サイズ（CHUNK_SIZE）に分割し、1スレッド ＝ 1チャンク を担当して走査するカーネル。
+ * チャンク（行グループ）ごとに並列 NFA マッチを行うカーネル。
+ * 各スレッドは d_chunk_line_start[tid] 〜 d_chunk_line_end[tid] の行を処理する。
  */
 __global__ void gpu_chunk_match_kernel(
-    const GPUState* d_states,  // GPU上の線形化NFA状態配列
-    const char* d_texts,       // テキストバッファ全体へのポインタ
-    size_t text_bytes,         // テキストの総バイト長
-    size_t chunk_size,         // 1チャンクあたりの基準バイトサイズ (例: 2048)
-    size_t overlap_size,       // 重ね合わせ境界幅 (例: 128)
-    int n_chunks,              // 総チャンク（スレッド）数
-    long long* d_res           // マッチした絶対バイト位置を格納する配列 (マッチなしは -1)
+    const GPUState* d_states,          // GPU 上の線形化 NFA 状態配列
+    const char*     d_texts,           // テキストバッファ全体
+    const int*      d_off,             // 各行の開始バイトオフセット
+    const int*      d_len,             // 各行の長さ
+    const int*      d_chunk_line_start,// チャンク tid の担当開始行インデックス
+    const int*      d_chunk_line_end,  // チャンク tid の担当終了行インデックス (exclusive)
+    int             n_chunks,
+    int*            d_line_matched     // 出力: 行ごとのマッチフラグ (0/1)
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n_chunks) return;
 
-    // 自分のチャンクの開始位置を算出
-    size_t start_idx = tid * chunk_size;
-    if (start_idx >= text_bytes) {
-        d_res[tid] = -1;
-        return;
-    }
+    int ls = d_chunk_line_start[tid];
+    int le = d_chunk_line_end[tid];
 
-    // 重ね合わせを含んだスキャン終了位置を決定
-    size_t end_idx = start_idx + chunk_size + overlap_size;
-    if (end_idx > text_bytes) {
-        end_idx = text_bytes;
-    }
+    /* チャンク内の各行を順番に NFA で処理する */
+    for (int li = ls; li < le; li++) {
+        const char* str = d_texts + d_off[li];
+        int len = d_len[li];
 
-    // スキャン対象範囲のポインタと長さを取得
-    const char* str = d_texts + start_idx;
-    size_t len = end_idx - start_idx;
+        int clist[256], nlist[256];
+        int n_c = 0, n_n = 0;
+        bool visited[256];
 
-    int clist[256], nlist[256];
-    int n_c = 0, n_n = 0;
-    bool visited[256];
-
-    for (int j = 0; j < 256; ++j) visited[j] = false;
-    add_state_local(clist, n_c, d_states, 0, visited);
-
-    long long matched_idx = -1;
-
-    // 初期状態で即マッチするか確認
-    for (int i = 0; i < n_c; ++i) {
-        if (d_states[clist[i]].c == Match) {
-            matched_idx = start_idx;
-            break;
-        }
-    }
-
-    // 1文字ずつ走査 (シングルパス O(L) 部分一致)
-    for (size_t pos = 0; pos < len && matched_idx == -1; ++pos) {
-        char ch = str[pos];
-
-        if (ch == '\n') {
-            // 改行文字に達した場合、行境界を跨いだ遷移を完全に遮断します！
-            // アクティブ状態リストを初期状態 (0) のみにリセットし、過去の行の進行状態をクリアします。
-            n_c = 0;
-            for (int j = 0; j < 256; ++j) visited[j] = false;
-            add_state_local(clist, n_c, d_states, 0, visited);
-            continue; // 改行自体の文字遷移は行いません
-        }
-
-        n_n = 0;
         for (int j = 0; j < 256; ++j) visited[j] = false;
+        add_state_local(clist, n_c, d_states, 0, visited);
 
-        for (int i = 0; i < n_c; ++i) {
-            const GPUState& st = d_states[clist[i]];
-            // ワイルドカード Any (258) も、改行文字ではない場合にのみ遷移を許可します（本家 grep 準拠）
-            if (st.c == static_cast<unsigned char>(ch) || (st.c == 258 /* Any */ && ch != '\n')) {
-                add_state_local(nlist, n_n, d_states, st.out, visited);
+        int matched = 0;
+
+        /* 空文字列でマッチするか確認 */
+        for (int i = 0; i < n_c; ++i)
+            if (d_states[clist[i]].c == Match) { matched = 1; break; }
+
+        /* 1文字ずつ走査（部分一致 O(L×m) Thompson NFA） */
+        for (int pos = 0; pos < len && !matched; ++pos) {
+            char ch = str[pos];
+            n_n = 0;
+            for (int j = 0; j < 256; ++j) visited[j] = false;
+
+            for (int i = 0; i < n_c; ++i) {
+                const GPUState& st = d_states[clist[i]];
+                if (st.c == static_cast<unsigned char>(ch) ||
+                    (st.c == 258 /* Any */ && ch != '\n'))
+                    add_state_local(nlist, n_n, d_states, st.out, visited);
             }
+            /* サブストリング対応のため start(0) を毎ステップ追加 */
+            add_state_local(nlist, n_n, d_states, 0, visited);
+
+            n_c = n_n;
+            for (int i = 0; i < n_c; ++i) clist[i] = nlist[i];
+
+            for (int i = 0; i < n_c; ++i)
+                if (d_states[clist[i]].c == Match) { matched = 1; break; }
         }
 
-        // サブストリング対応のための start(0) 追加
-        add_state_local(nlist, n_n, d_states, 0, visited);
-
-        n_c = n_n;
-        for (int i = 0; i < n_c; ++i) clist[i] = nlist[i];
-
-        // 受理状態到達チェック
-        for (int i = 0; i < n_c; ++i) {
-            if (d_states[clist[i]].c == Match) {
-                // テキスト全体の「絶対バイトインデックス」を計算して書き込み、即座にループを抜ける
-                matched_idx = start_idx + pos;
-                break;
-            }
-        }
+        d_line_matched[li] = matched;
     }
-
-    d_res[tid] = matched_idx;
 }
 
 extern "C" {
 
 /**
- * アプローチ 2 (固定長チャンク並列) のホスト側実行API
+ * アプローチ 2 (行グループ並列 / Chunk-Parallel) のホスト側実行 API
+ *
+ * - テキストを LINES_PER_CHUNK 行ずつのチャンクに分割
+ * - 1 CUDA スレッドが 1 チャンク（複数行）を担当
+ * - 全行を正確に処理するため、マッチ数は line-parallel と一致する
  */
 SearchResult gpu_chunk_parallel(struct NFA *nfa, const char *text, size_t text_bytes) {
     SearchResult result = create_search_result();
     if (!text || text_bytes == 0) return result;
 
-    // 1. 各論理行の開始インデックステーブルを構築 (後でマッチ絶対位置から行番号を「高速逆引き」するため)
-    std::vector<size_t> line_starts;
-    std::vector<size_t> line_lens;
-    
-    const char* current_line = text;
-    const char* text_end = text + text_bytes;
-    while (current_line < text_end) {
-        const char* next_line = (const char*)memchr(current_line, '\n', text_end - current_line);
-        size_t len;
-        if (next_line) {
-            len = next_line - current_line;
-        } else {
-            len = text_end - current_line;
-        }
-        line_starts.push_back(current_line - text);
-        line_lens.push_back(len);
+    /* 1. 行分割 */
+    std::vector<int>        h_off;
+    std::vector<int>        h_len;
+    std::vector<const char*> line_ptrs;
 
-        if (next_line) {
-            current_line = next_line + 1;
-        } else {
-            break;
-        }
+    const char* cur  = text;
+    const char* tend = text + text_bytes;
+
+    while (cur < tend) {
+        const char* nl = (const char*)memchr(cur, '\n', tend - cur);
+        size_t len = nl ? (size_t)(nl - cur) : (size_t)(tend - cur);
+        h_off.push_back((int)(cur - text));
+        h_len.push_back((int)len);
+        line_ptrs.push_back(cur);
+        cur = nl ? nl + 1 : tend;
+        if (!nl) break;
     }
 
-    // 2. チャンクサイズと重ね合わせのパラメータ決定
-    const size_t CHUNK_SIZE = 2048;      // Warpの実行を揃える均一チャンクサイズ
-    const size_t OVERLAP_SIZE = 128;     // 境界跨ぎを完全に吸収する重ね合わせ境界幅
-    int n_chunks = (text_bytes + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    int n_lines = (int)h_off.size();
+    if (n_lines == 0) return result;
 
-    // 3. NFA 状態配列の作成
+    /* 2. チャンク分割: LINES_PER_CHUNK 行ずつ 1 スレッドに割り当てる */
+    int n_chunks = (n_lines + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK;
+    std::vector<int> h_chunk_ls(n_chunks), h_chunk_le(n_chunks);
+    for (int c = 0; c < n_chunks; c++) {
+        h_chunk_ls[c] = c * LINES_PER_CHUNK;
+        h_chunk_le[c] = std::min((c + 1) * LINES_PER_CHUNK, n_lines);
+    }
+
+    /* 3. NFA 状態配列の作成 */
     order.clear();
     idx_map.clear();
     gather_states(nfa->start);
@@ -143,66 +134,73 @@ SearchResult gpu_chunk_parallel(struct NFA *nfa, const char *text, size_t text_b
         h_states[i] = { s->c, idx_of(s->out), idx_of(s->out1), 0 };
     }
 
-    // 4. GPU メモリの確保と転送
+    /* 4. GPU メモリの確保と転送 */
     GPUState* d_states;
     char*     d_texts;
-    long long* d_res;
+    int*      d_off_gpu;
+    int*      d_len_gpu;
+    int*      d_chunk_ls_gpu;
+    int*      d_chunk_le_gpu;
+    int*      d_line_matched;
 
-    cudaMalloc(&d_states, h_states.size() * sizeof(GPUState));
-    cudaMalloc(&d_texts,  text_bytes);
-    cudaMalloc(&d_res,    n_chunks * sizeof(long long));
+    cudaMalloc(&d_states,       h_states.size() * sizeof(GPUState));
+    cudaMalloc(&d_texts,        text_bytes);
+    cudaMalloc(&d_off_gpu,      n_lines  * sizeof(int));
+    cudaMalloc(&d_len_gpu,      n_lines  * sizeof(int));
+    cudaMalloc(&d_chunk_ls_gpu, n_chunks * sizeof(int));
+    cudaMalloc(&d_chunk_le_gpu, n_chunks * sizeof(int));
+    cudaMalloc(&d_line_matched, n_lines  * sizeof(int));
 
-    cudaMemcpy(d_states, h_states.data(), h_states.size() * sizeof(GPUState), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_texts,  text,            text_bytes,                       cudaMemcpyHostToDevice);
+    cudaMemcpy(d_states,       h_states.data(),   h_states.size() * sizeof(GPUState), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_texts,        text,               text_bytes,                         cudaMemcpyHostToDevice);
+    cudaMemcpy(d_off_gpu,      h_off.data(),       n_lines  * sizeof(int),             cudaMemcpyHostToDevice);
+    cudaMemcpy(d_len_gpu,      h_len.data(),       n_lines  * sizeof(int),             cudaMemcpyHostToDevice);
+    cudaMemcpy(d_chunk_ls_gpu, h_chunk_ls.data(),  n_chunks * sizeof(int),             cudaMemcpyHostToDevice);
+    cudaMemcpy(d_chunk_le_gpu, h_chunk_le.data(),  n_chunks * sizeof(int),             cudaMemcpyHostToDevice);
+    cudaMemset(d_line_matched, 0, n_lines * sizeof(int));
 
-    // 5. CUDA カーネル起動 (チャンク並列)
+    /* 5. カーネル起動 (1ブロックあたり 256 スレッド) */
     int threads = 256;
     int blocks  = (n_chunks + threads - 1) / threads;
-    gpu_chunk_match_kernel<<<blocks, threads>>>(d_states, d_texts, text_bytes, CHUNK_SIZE, OVERLAP_SIZE, n_chunks, d_res);
+    gpu_chunk_match_kernel<<<blocks, threads>>>(
+        d_states, d_texts, d_off_gpu, d_len_gpu,
+        d_chunk_ls_gpu, d_chunk_le_gpu, n_chunks, d_line_matched
+    );
     cudaDeviceSynchronize();
     {
         cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
+        if (err != cudaSuccess)
             fprintf(stderr, "CUDA Error (Chunk Parallel): %s\n", cudaGetErrorString(err));
-        }
     }
 
-    // 6. 結果の回収と「高速逆引き行特定」
-    std::vector<long long> h_res(n_chunks);
-    cudaMemcpy(h_res.data(), d_res, n_chunks * sizeof(long long), cudaMemcpyDeviceToHost);
+    /* 6. 結果の回収 */
+    std::vector<int> h_line_matched(n_lines);
+    cudaMemcpy(h_line_matched.data(), d_line_matched, n_lines * sizeof(int), cudaMemcpyDeviceToHost);
 
-    // 同一行が複数チャンクで重なって重複マッチするのを防ぐためのユニークセット
-    std::vector<bool> matched_lines(line_starts.size(), false);
-
-    for (int i = 0; i < n_chunks; ++i) {
-        long long match_pos = h_res[i];
-        if (match_pos >= 0 && match_pos < (long long)text_bytes) {
-            // [ハイブリッド技術] 二分探索 (std::upper_bound) を用いて、
-            // チャンク内で検出されたマッチ絶対バイト位置が「元のテキストの何行目に該当するか」を O(log N) で超高速逆引き特定！
-            auto it = std::upper_bound(line_starts.begin(), line_starts.end(), (size_t)match_pos);
-            int line_idx = std::distance(line_starts.begin(), it) - 1;
-            
-            if (line_idx >= 0 && line_idx < (int)line_starts.size() && !matched_lines[line_idx]) {
-                matched_lines[line_idx] = true;
-                
-                size_t start = line_starts[line_idx];
-                size_t len = line_lens[line_idx];
-                
+    /* 7. SearchResult への格納（最初の MAX_STORED_MATCHES 件のみ内容を保存） */
+    for (int i = 0; i < n_lines; ++i) {
+        if (h_line_matched[i]) {
+            if (result.stored_count < MAX_STORED_MATCHES) {
+                int len = h_len[i];
                 char* line_buf = (char*)malloc(len + 1);
-                memcpy(line_buf, text + start, len);
+                memcpy(line_buf, line_ptrs[i], len);
                 line_buf[len] = '\0';
-                
-                // 行番号と文字列を結果に追加
-                add_match_item(&result, line_idx + 1, line_buf);
+                add_match_item(&result, i + 1, line_buf);
                 free(line_buf);
+            } else {
+                result.count++;  // 内容は保存しない、カウントのみ
             }
         }
     }
 
-    // 7. デバイスメモリ解放
+    /* 8. GPU メモリ解放 */
     cudaFree(d_states);
     cudaFree(d_texts);
-    cudaFree(d_res);
+    cudaFree(d_off_gpu);
+    cudaFree(d_len_gpu);
+    cudaFree(d_chunk_ls_gpu);
+    cudaFree(d_chunk_le_gpu);
+    cudaFree(d_line_matched);
 
     return result;
 }
