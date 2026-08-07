@@ -29,28 +29,8 @@ CPU および GPU（3種の並列化戦略）に対してスイープ実験を�
 
 ## 2. 実行フロー（全体）
 
-```mermaid
-flowchart TD
-    A([run_all.sh 開始]) --> B
+![run_all.sh 実行フロー](run_all_flow.png)
 
-    B["[1/5] CPU スイープ\nrun_sweep.sh を N 回実行"] --> B2
-    B2["N 回分の summary.csv を平均\naverage_sweeps.py → cpu/avg.csv"] --> C
-
-    C{--cpu-only ?}
-    C -- No --> D
-    C -- Yes --> G
-
-    D["[2/5] GPU スイープ\nrun_sweep_gpu.sh を N 回実行\n（Line / Chunk / Dynamic の3手法）"] --> D2
-    D2["各手法 N 回分を平均\naverage_sweeps.py → gpu_line/avg.csv\n                  → gpu_chunk/avg.csv\n                  → gpu_chunk_dynamic/avg.csv"] --> G
-
-    G["[3/5] LPC スイープ\n（デフォルトはスキップ）\nrun_lpc_sweep.sh"] --> H
-
-    H["[4/5] グラフ描画\nplot_benchmark.py\n→ benchmark_grid.png"] --> I
-
-    I["[5/5] LPC グラフ描画\nplot_lpc_sweep.py\n→ lpc_sweep_grid.png"] --> J
-
-    J["latest シンボリックリンクを更新\nresults/latest → run_<timestamp>"] --> K([完了])
-```
 
 ---
 
@@ -150,23 +130,23 @@ results/latest -> run_<timestamp>  ← 最新実行へのシンボリックリ�
 
 ```mermaid
 graph TD
-    A[run_all.sh] --> B[run_sweep.sh\nCPU スイープ]
-    A --> C[run_sweep_gpu.sh\nGPU スイープ]
-    A --> D[run_lpc_sweep.sh\nLPC スイープ]
-    A --> E[scripts/plot_benchmark.py\nCPU vs GPU グラフ]
-    A --> F[scripts/plot_lpc_sweep.py\nLPC グラフ]
+    A[run_all.sh] --> B[run_sweep.sh]
+    A --> C[run_sweep_gpu.sh]
+    A --> D[run_lpc_sweep.sh]
+    A --> E[plot_benchmark.py]
+    A --> F[plot_lpc_sweep.py]
 
-    B --> G[run_benchmark.out\nCPU バイナリ]
-    B --> H[scripts/aggregate_sweep.py\nCSV 集約]
-    B --> I[scripts/average_sweeps.py\n複数回平均]
+    B --> G[run_benchmark.out]
+    B --> H[aggregate_sweep.py]
+    B --> I[average_sweeps.py]
 
-    C --> J[run_benchmark_gpu_line.out\nLine-Parallel バイナリ]
-    C --> K[run_benchmark_gpu_chunk.out\nChunk-Parallel バイナリ]
-    C --> L[run_benchmark_gpu_chunk_dynamic.out\nDynamic バイナリ]
+    C --> J[run_benchmark_gpu_line.out]
+    C --> K[run_benchmark_gpu_chunk.out]
+    C --> L[run_benchmark_gpu_chunk_dynamic.out]
     C --> H
     C --> I
 
-    D --> M[run_benchmark_gpu_chunk_lpcN.out\nLPC 値ごとのバイナリ]
+    D --> M["run_benchmark_gpu_chunk_lpcN.out"]
     D --> H
     D --> I
 ```
