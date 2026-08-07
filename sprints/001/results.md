@@ -426,6 +426,76 @@ Chunk Static（2M行、LPC=8）のスレッド数 = 2M/8 = **250K** → 1 波以
 
 ---
 
+## 5F. 実験 F: ブロック型データ × 行数スケール（3回平均）
+
+**目的**: ブロック型行長分布（Dynamic が有利な条件）と大行数（Line が劣後する条件）を組み合わせた場合の3手法の相互作用を観察する。  
+**設計**: 長行数を 6,422 行で固定し、短行数だけを変化させる → Dynamic の「文字数均等化メリット」を一定に保ちつつ行数効果だけを変える。  
+**データ構造**: 前半ブロック = 短行（1〜15文字、avg 9.1文字）、後半ブロック = 長行（500文字以上、avg 778.6文字）
+
+### データセット仕様
+
+| データセット | 短行数 | 長行数 | 合計行数 | 総文字数 | GPU Line 波数 |
+|---|---|---|---|---|---|
+| blocked-small | 25,000 | 6,422（固定） | 31,422 | 5.2M | **0.09 波** |
+| blocked-medium | 500,000 | 6,422（固定） | 506,422 | 9.5M | **1.45 波** |
+| blocked-large | 2,000,000 | 6,422（固定） | 2,006,422 | 23.1M | **5.76 波** |
+
+### 計測結果（30 パターン平均、3回平均）
+
+| データセット | GPU Line (ms) | Chunk Static (ms) | Chunk Dynamic (ms) | Line/Sta | Dyn/Sta | **最速** |
+|---|---|---|---|---|---|---|
+| blocked-small | **13.33** | 18.76 | 15.56 | 0.710x | 0.829x | **Line** |
+| blocked-medium | **17.52** | 24.31 | **17.51** | 0.721x | 0.720x | **Line ≈ Dynamic** |
+| blocked-large | **34.80** | 43.34 | 37.34 | 0.803x | 0.861x | **Line** |
+
+### CPU前処理 / GPU実行 内訳
+
+| データセット | Line pre | Line gpu | Static pre | Static gpu | Dyn pre | Dyn gpu |
+|---|---|---|---|---|---|---|
+| blocked-small | 0.34ms | 12.96ms | 0.30ms | 18.44ms | 0.34ms | 15.20ms |
+| blocked-medium | 2.53ms | 14.97ms | 2.58ms | 21.71ms | 2.97ms | 14.52ms |
+| blocked-large | 10.14ms | 24.63ms | 10.20ms | 33.12ms | **12.36ms** | **24.94ms** |
+
+![fig7_blocked_scale](figures/fig7_blocked_scale.png)
+
+### 考察
+
+#### 発見1: blocked-large でも Line が最速
+
+- uniform-large（均一行長）ではLine が Static の **1.36x 遅い**のに対し、  
+  blocked-large では Line が Static の **0.80x（25% 速い）**。
+- blocked 構造では GPU Line も恩恵を受ける: 短行 2M 本は各スレッドの処理が軽い（avg 9文字）ため、  
+  5.76 波分割のオーバーヘッドが実際の計算時間に比べて小さい。
+
+#### 発見2: Dynamic の CPU前処理コストが短行数に比例して増大
+
+- Dyn_pre の推移: 0.34ms → 2.97ms → **12.36ms**（短行数に比例）
+- Static_pre との差: +0.04ms → +0.39ms → **+2.16ms**（short行が増えるほど前処理コスト差が拡大）
+- Dynamic の GPU実行は blocked-large でも Static より **8ms 速い**（Sta_gpu=33.12ms vs Dyn_gpu=24.94ms）
+
+> [!IMPORTANT]
+> **Dynamic が blocked-large で Line に負ける理由は GPU実行の問題ではない。**  
+> GPU実行は Line と同等（24.63ms vs 24.94ms）だが、CPU前処理が 2.22ms 多い（12.36ms vs 10.14ms）。  
+> **長行数固定・短行大量増加というデータ構造が Dynamic を不利にしている。**
+
+#### 発見3: blocked-medium が Dynamic の最適点
+
+- blocked-medium（506K行、1.45波）では Line=17.52ms ≈ Dynamic=17.51ms（ほぼ同点）
+- Dynamic の GPU効率（チャンク均等化）と CPU前処理コストのバランスが最も良い
+- これより行数が増えると Dynamic の前処理コストが GPU効率を上回る
+
+#### なぜ Dynamic のCPU前処理が短行数に敏感なのか
+
+Dynamic の前処理は全テキストを 1 文字ずつスキャンして `memchr('\n')` で行境界を探し、  
+文字数均等なチャンク境界を O(n_chars) で計算する。  
+短行 2M 本は 18MB のテキストであり、この 18MB スキャンコスト（~10ms）が支配的になる。  
+長行（5MB）の均等化メリット（~8ms GPU高速化）で相殺されているが、前処理オーバーヘッドが若干上回る。
+
+> **結論**: Dynamic の真の優位は「Dynamic 前処理を GPU 化（Prefix Sum）した場合」に生まれる可能性が高い。  
+> これが Next Action C（`sprints/001/results.md § 9.2C`）として引き継がれる。
+
+---
+
 ## 6. 全データセット最終まとめ
 
 | データセット | 行長分布パターン | SD | 行数 | Dyn/Sta比 | Dynamic 有利? |
