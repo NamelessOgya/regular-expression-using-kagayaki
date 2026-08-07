@@ -11,25 +11,27 @@
 
 | 手法 | CPU前処理(秒) | GPU実行(秒) | 合計(秒) | Dyn/Sta比 |
 |---|---|---|---|---|
-| GPU Chunk Static | 0.000015 | 0.062013 | 0.063500 | — |
-| GPU Chunk Dynamic | 0.022792 | 0.048513 | 0.070811 | **1.115x（Dynamic が遅い）** |
+| GPU Chunk Static | 0.019814 | 0.043736 | 0.063550 | — |
+| GPU Chunk Dynamic | 0.023162 | 0.048253 | 0.071415 | **1.124x（Dynamic が遅い）** |
 
 ### 内訳分析
 
-- **CPU前処理**: Dynamic は Static の約 **1,500倍** 遅い（0.000015 s → 0.022792 s）
-- **GPU実行**: Dynamic は Static より約 **22% 速い**（行長均等化の恩恵）
-- **総合**: CPU前処理のオーバーヘッドが GPU 実行の改善を打ち消し、Dynamic が 11.5% 遅くなる
+- **CPU前処理**: Dynamic は Static より **3.4ms 遅い**（19.8ms → 23.2ms、約 1.17 倍）
+- **GPU実行**: Dynamic は Static より **4.5ms 遅い**（43.7ms → 48.3ms、約 1.10 倍）
+- **総合**: CPU前処理・GPU実行の両方で Dynamic が遅く、合計で 12.4% 遅い（Dyn/Sta=1.124x）
+
+> [!NOTE]
+> CPU前処理の差は 3.4ms（全体の 5%）、GPU実行の差は 4.5ms（全体の 7%）。
+> 両方の要因が積み重なって Dynamic が遅くなっている。
 
 ### 結論
 
-> **仮説支持**: Dynamic の遅さは CPU前処理（O(n_lines) の文字数スキャン）に起因する。  
-> GPU 実行自体は Dynamic の方が速く、理論通り負荷分散の効果が出ている。
+> **仮説**: Dynamic の遅さは CPU前処理（O(n_lines) のスキャン）に起因するという仮説は、
+> この実験では**完全には支持されなかった**。
+> CPU前処理差（3.4ms）は存在するが小さく、GPU実行差（4.5ms）も合計差に貢献している。
+> enwik8 では「Dynamic の GPU 実行が Static より速い」という効果は観測されなかった。
 
-> [!NOTE]
-> 下記の数値は初回計測値です。再実験（3回平均）の正確な値は
-> `fig4_experiment_a_breakdown.png` に示す通りです（Static: 19.8ms+42ms=61.8ms / Dynamic: 23.2ms+46ms=69.2ms）。
-
-**図: enwik8 CPU前処理 vs GPU実行 内訳**
+**図: enwik8 CPU前処理 vs GPU実行 内訳（3回平均）**
 
 ![fig4_experiment_a_breakdown](figures/fig4_experiment_a_breakdown.png)
 
