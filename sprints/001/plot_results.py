@@ -48,6 +48,7 @@ DATASETS = [
     ("Uniform\n(157K lines)", "results/sprint001_redo_uniform",      8.6  ),
     ("Varied\n(25K lines)",   "results/run_20260807_11_01_47",       434.1),
     ("Extreme\n(7.6K lines)", "results/sprint001_redo_extreme2",     1355.5),
+    ("Blocked\n(196K lines)", "results/sprint001_redo_blocked",      146.2),
 ]
 
 METHODS   = ['gpu_line', 'gpu_chunk', 'gpu_chunk_dynamic']
@@ -57,7 +58,7 @@ COLORS    = ['#4e79a7', '#59a14f', '#e15759']
 # ═══════════════════════════════════════════════════════════════
 # Fig 1: Total execution time — all datasets × 3 methods
 # ═══════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(1, 4, figsize=(16, 5))
+fig, axes = plt.subplots(1, 5, figsize=(20, 5))
 fig.suptitle("Total Execution Time by Method and Dataset\n(max text size per dataset, avg of 30 patterns)",
              fontsize=12, y=1.01)
 
@@ -71,7 +72,7 @@ for ax, (label, base, sd) in zip(axes, DATASETS):
     bars = ax.bar(x, totals, 0.6, color=COLORS, alpha=0.85, edgecolor='white')
     ax.set_xticks(x)
     ax.set_xticklabels(MLABELS, fontsize=8, rotation=15, ha='right')
-    ax.set_title(label, fontsize=10)
+    ax.set_title(label, fontsize=9)
     ax.set_ylabel("Time (s)" if ax == axes[0] else "", fontsize=9)
     for bar, val in zip(bars, totals):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(totals)*0.01,
@@ -139,7 +140,7 @@ plt.close()
 # ═══════════════════════════════════════════════════════════════
 # Fig 3: GPU execution time breakdown (preprocess vs gpu exec)
 # ═══════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(1, 4, figsize=(16, 5))
+fig, axes = plt.subplots(1, 5, figsize=(20, 5))
 fig.suptitle("Execution Time Breakdown: CPU Preprocess vs GPU Exec\n(Static vs Dynamic per dataset)",
              fontsize=12, y=1.01)
 
@@ -176,9 +177,9 @@ plt.close()
 # ═══════════════════════════════════════════════════════════════
 fig, ax = plt.subplots(figsize=(7, 5))
 
-line_counts = [831543, 157538, 25260, 7632]  # approximate n_lines per dataset
-dataset_labels_sc = ['enwik8\n(831K)', 'Uniform\n(157K)', 'Varied\n(25K)', 'Extreme\n(7.6K)']
-point_colors = ['#4e79a7', '#59a14f', '#f28e2b', '#e15759']
+line_counts = [831543, 157538, 25260, 7632, 196015]  # approximate n_lines per dataset
+dataset_labels_sc = ['enwik8\n(831K)', 'Uniform\n(157K)', 'Varied\n(25K)', 'Extreme\n(7.6K)', 'Blocked\n(196K)']
+point_colors = ['#4e79a7', '#59a14f', '#f28e2b', '#e15759', '#b07aa1']
 
 for lc, ratio, lbl, col in zip(line_counts, dyn_sta_ratios, dataset_labels_sc, point_colors):
     ax.scatter(lc, ratio, s=140, color=col, zorder=5, edgecolors='white', linewidth=1.5)
