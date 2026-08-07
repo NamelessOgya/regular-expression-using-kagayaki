@@ -90,7 +90,28 @@ Dockerで `--gpus all` オプションを使うために、ホストマシンへ
 
 > **注意**: `curl` と `python3` が必要。コンテナ内には同梱済み。
 
-### 4-a. CPU版ベンチマーク実験の実行
+### 4. 統合ベンチマーク実験の実行（通常はこちらを使用）
+
+コンテナ内で以下を実行する。CPU・GPU 全手法のスイープ実験、複数回試行の平均化、グラフ生成まで一括で行う。
+
+```bash
+./run_all.sh
+```
+
+主なオプション:
+
+```bash
+./run_all.sh --runs 5       # 各ベンチマークを5回繰り返す（デフォルト: 3回）
+./run_all.sh --cpu-only     # CPU のみ実行（GPU はスキップ）
+```
+
+実行完了後、`results/run_<timestamp>/plots/benchmark_grid.png` に CPU vs GPU 比較グラフが生成される。
+
+> **詳細**: 実行フローや出力ディレクトリ構造の詳細は [docs/run_all.md](docs/run_all.md) を参照。
+
+---
+
+### 4-a. 単体テスト: CPU版ビルド＆動作確認
 
 コンテナ内で以下を実行する。
 
@@ -138,3 +159,14 @@ Dockerで `--gpus all` オプションを使うために、ホストマシンへ
 ```bash
 ls ./results/
 ```
+
+---
+
+## ドキュメント
+
+| ドキュメント | 内容 |
+|---|---|
+| [docs/run_all.md](docs/run_all.md) | `run_all.sh` の実行フロー・オプション・出力構造の詳細 |
+| [docs/gpu_parallelism.md](docs/gpu_parallelism.md) | GPU 並列化戦略（Line-Parallel vs Chunk-Parallel）の比較 |
+| [docs/time_measurement.md](docs/time_measurement.md) | 実行時間の計測方法 |
+| [docs/dataset.md](docs/dataset.md) | ベンチマーク対象データセット（enwik8）の詳細 |
