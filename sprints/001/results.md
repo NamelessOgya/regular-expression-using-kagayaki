@@ -10,27 +10,128 @@
 
 ### 1.1 対象実装
 
-本実験では 3 種類の GPU 正規表現マッチング実装を比較する。
+本実験では CPU 版 1 種類と GPU 版 3 種類、合計 4 種類の NFA ベース正規表現マッチング実装を比較する。  
+NFA は Thompson の構成法で構築し、部分一致検索（O(L × m)、L: 行長、m: NFA 状態数）を各行に適用する。
 
-| 実装名 | ファイル | アルゴリズム概要 |
-|---|---|---|
-| **GPU Line** | `nfa_gpu.cu` | 1スレッドが1行を担当（Line-Parallel） |
-| **GPU Chunk Static** | `nfa_gpu_chunk.cu` | 連続する LPC 行を1チャンクとして1スレッドが担当（固定行数分割） |
-| **GPU Chunk Dynamic** | `nfa_gpu_chunk.cu` | 累積文字数が均等になるようチャンク境界を動的に計算（文字数均等分割） |
+| 実装名 | ファイル | 並列単位 | スレッド数 |
+|---|---|---|---|
+| CPU | `nfa_cpu.c` | シリアル（1スレッド） | 1 |
+| **GPU Line** | `src/gpu/line_parallel/nfa_gpu.cu` | **1スレッド = 1行** | n_lines |
+| **GPU Chunk Static** | `src/gpu/chunk_parallel/nfa_gpu_chunk.cu` | **1スレッド = LPC 行（固定）** | ⌈n_lines / LPC⌉ |
+| **GPU Chunk Dynamic** | `src/gpu/chunk_parallel/nfa_gpu_chunk.cu` | **1スレッド = 文字数が均等になるチャンク** | ⌈n_lines / LPC⌉（目標） |
 
-デフォルト LPC（Lines Per Chunk）= 8。
+デフォルト LPC（Lines Per Chunk）= 8。CUDA ブロックサイズ = 256 スレッド。
 
-### 1.2 計測項目
+---
 
-`avg.csv` の各列の定義:
+### 1.2 GPU 3 手法の詳細
 
-| 列名 | 内容 |
-|---|---|
-| `CPU前処理(秒)` | チャンク境界計算などの CPU 側処理時間 |
-| `GPU実行(秒)` | カーネル起動 〜 `cudaDeviceSynchronize` までの時間 |
-| `実行時間(秒)` | 合計実行時間（CPU前処理 + GPU実行） |
+#### (1) GPU Line（Line-Parallel）
 
-### 1.3 ベースデータ
+各行を独立した CUDA スレッドで並列処理する最もシンプルな並列化手法。
+
+```
+n_threads = n_lines
+for each thread tid:
+    process line[tid] with NFA
+```
+
+- **特徴**: スレッド数が行数に等しく、GPU 並列度を最大化できる
+- **弱点**: 行長が不均一な場合、長い行を処理するスレッドがボトルネックになりワープ内でアイドルスレッドが発生する
+- **CPU前処理**: 行オフセット計算 O(text_bytes) のみ。チャンク境界計算は不要
+
+#### (2) GPU Chunk Static（固定行数チャンク分割）
+
+テキストを **LPC 行ごとの固定サイズチャンク**に分割し、1 スレッドが 1 チャンクを担当する。
+
+```c
+// 前処理コード（nfa_gpu_chunk.cu L121-127）
+n_chunks = (n_lines + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK;
+for (int c = 0; c < n_chunks; c++) {
+    chunk_ls[c] = c * LINES_PER_CHUNK;           // チャンクの開始行
+    chunk_le[c] = min((c+1) * LINES_PER_CHUNK, n_lines);  // チャンクの終了行
+}
+```
+
+- **特徴**: CPU 前処理が O(n_lines / LPC) と軽量
+- **弱点**: チャンク内の行長が不均一な場合、スレッド間で処理時間が大きく異なる（ロードインバランス）
+- **CPU前処理**: 行分割 O(text_bytes) + 固定チャンク境界計算 O(n_chunks)
+
+#### (3) GPU Chunk Dynamic（文字数ベース動的チャンク分割）
+
+累積文字数が均等になるようにチャンク境界を動的に決定する手法。
+
+```c
+// 前処理コード（nfa_gpu_chunk.cu L246-274）
+total_chars = sum(h_len[i] for i in range(n_lines));   // 全行スキャン O(n_lines)
+n_chunks_target = (n_lines + LPC - 1) / LPC;
+target_chars = total_chars / n_chunks_target;          // 1チャンクの目標文字数
+
+// 累積文字数でチャンク境界を決定
+running_chars = 0; chunk_start = 0;
+for each line i:
+    running_chars += h_len[i];
+    if running_chars >= target_chars or i == last:
+        emit chunk(chunk_start, i+1)
+        chunk_start = i+1; running_chars = 0
+```
+
+- **特徴**: 各チャンクの総文字数がほぼ均等になり、スレッド間の処理時間が揃う
+- **弱点**: CPU 前処理が O(n_lines) のスキャンを必要とする
+- **CPU前処理**: 行分割 O(text_bytes) + 文字数累積スキャン O(n_lines) + チャンク境界確定 O(n_lines)
+
+#### 計測時間の定義（ソースコード L98-214 より）
+
+```
+cpu_pre_time  = t1 - t0  : 行分割 + チャンク境界計算（Static/Dynamic で内容が異なる）
+gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSynchronize + cudaMemcpy D→H
+```
+
+> [!NOTE]
+> **両手法の cpu_pre_time には行分割処理（O(text_bytes) の memchr ループ）が含まれる。**  
+> このため、enwik8（95MB）での Static CPU前処理 19.8ms の大部分は行分割コスト。  
+> Dynamic と Static の前処理差（3.4ms）が Dynamic 固有の O(n_lines) スキャンコストに相当する。
+
+---
+
+### 1.3 使用した正規表現パターン
+
+ベンチマークには `data/test_cases.csv` に定義された **30 種類**の正規表現パターンを使用する。  
+すべての実験で同一の 30 パターンを適用し、実行時間はその**30 パターンの平均**として報告する。
+
+#### パターン一覧
+
+| # | パターン | 種別 | 特徴 |
+|---|---|---|---|
+| 1 | `the` | 単純な部分文字列 | 高頻度・短パターン |
+| 2 | `(The\|An\|In\|Of)` | 複数選択肢 | 先頭大文字語 |
+| 3 | `Wikipedia` | 単純な部分文字列 | 固有名詞 |
+| 4 | `a*b` | 量指定子 `*` | NFA 分岐が多い |
+| 5 | `go*gle` | 量指定子 `*` | 実用的な誤字パターン |
+| 6 | `(one\|two\|three\|four\|five)` | 数詞の選択 | 状態数が増加 |
+| 7 | `cat\|dog` | 2択 | シンプルな選択肢 |
+| 8 | `http` | URL 接頭辞 | 低頻度マッチ |
+| 9 | `.+ing` | 任意文字 + 接尾辞 | ワイルドカード使用 |
+| 10 | `a+b*c` | 量指定子の組み合わせ | |
+| 11 | `the .+` | 広域ワイルドカード | 多くの行にマッチ |
+| 12 | `.+ of .+` | 複合ワイルドカード | |
+| 13 | `(19\|20).+` | 世紀パターン | 年代 |
+| 14 | `http.+` | URL パターン | 低頻度マッチ |
+| 15 | `.+ the .+` | 高頻度ワイルドカード | ほぼ全行にマッチ |
+| 16 | `http.+wiki` | URL + 固有名詞 | |
+| 17 | `(the\|a\|an) .+` | 冠詞 + ワイルドカード | 高頻度マッチ |
+| 18 | `.+er` | 接尾辞 | |
+| 19 | `.+ and .+` | 接続詞パターン | |
+| 20 | `.+ly` | 副詞接尾辞 | |
+| 21 | `(the)` | グループ化 | パターン1の括弧版 |
+| 22〜30 | `(the\|and\|for\|...)` | 単語選択肢の漸増 | 2語→10語の段階的拡張 |
+
+> **選択肢が増えるほど NFA の状態数が増加し、1文字あたりの処理コストが上昇する。**  
+> これにより、行長の違いが GPU スレッド実行時間の差として顕在化しやすくなる。
+
+---
+
+### 1.4 ベースデータ
 
 **enwik8** (`data/wiki_plain.txt`): Wikipedia テキスト（英語）
 
