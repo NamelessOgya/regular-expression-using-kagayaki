@@ -26,11 +26,12 @@ ENV LC_ALL=en_US.UTF-8
 RUN [ ! -e /usr/bin/python ] && ln -s /usr/bin/python3 /usr/bin/python || true \
  && [ ! -e /usr/bin/pip ]    && ln -s /usr/bin/pip3    /usr/bin/pip    || true
 
-# データセット生成に必要な Python ライブラリ
+# データセット生成・分析・グラフ描画に必要な Python ライブラリ
 RUN pip install --no-cache-dir \
     datasets \
     pandas \
     numpy \
-    tqdm
+    tqdm \
+    matplotlib
 
 WORKDIR /app
