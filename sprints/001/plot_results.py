@@ -44,10 +44,10 @@ def get_stats(base, method, max_only=True):
 # ─── Datasets ──────────────────────────────────────────────────
 # enwik8 results (avg.csv, 3 runs) are the reference for large scale
 DATASETS = [
-    ("enwik8\n(831K lines)",  "results/latest",              407.0),
-    ("Uniform\n(157K lines)", "results/sprint001_uniform",   8.6  ),
-    ("Varied\n(25K lines)",   "results/sprint001_varied",    434.1),
-    ("Extreme\n(7.6K lines)", "results/sprint001_varied_extreme", 1355.5),
+    ("enwik8\n(831K lines)",  "results/run_20260807_09_30_15",      407.0),
+    ("Uniform\n(157K lines)", "results/sprint001_redo_uniform",      8.6  ),
+    ("Varied\n(25K lines)",   "results/run_20260807_11_01_47",       434.1),
+    ("Extreme\n(7.6K lines)", "results/sprint001_redo_extreme2",     1355.5),
 ]
 
 METHODS   = ['gpu_line', 'gpu_chunk', 'gpu_chunk_dynamic']
