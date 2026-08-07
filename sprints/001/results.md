@@ -369,6 +369,63 @@ gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSyn
 
 ---
 
+## 5E. 実験 E: 行数スケールと GPU Line の並列度限界（3回平均）
+
+**目的**: 行数が RTX 5090 の物理並列度（348,160 同時スレッド）を超えた場合に GPU Line が劣後することを定量化する。  
+**データ**: 均一行長（30〜60 文字）で行数だけを変化させた合成データ（生成スクリプト: `sprints/001/generate_scale_data.py`）  
+**結果ディレクトリ**: `results/sprint001_scale/`
+
+### データセット仕様
+
+| データセット | 行数 | 平均行長 | 総文字数 | GPU Line ウェーブ数 | Chunk ウェーブ数 |
+|---|---|---|---|---|---|
+| dynamic-small | 25,000 | 42.0 | 1.1M | **0.07 波** | 0.01 波 |
+| dynamic-medium | 500,000 | 41.9 | 21.0M | **1.44 波** | 0.18 波 |
+| dynamic-large | 2,000,000 | 41.9 | 83.8M | **5.74 波** | 0.72 波 |
+
+> RTX 5090: 170 SMs × 2,048 threads/SM = **348,160** 同時実行スレッド、ブロックサイズ = 256
+
+### 計測結果（30 パターン平均、3回平均）
+
+| データセット | GPU Line (ms) | Chunk Static (ms) | Chunk Dynamic (ms) | Line/Static | Dyn/Static |
+|---|---|---|---|---|---|
+| dynamic-small | 34.70 | 35.40 | 36.05 | 0.980x ✅ | 1.019x |
+| dynamic-medium | 36.85 | 35.08 | 36.23 | 1.050x | 1.033x |
+| dynamic-large | **51.35** | **37.88** | **38.79** | **1.356x 🔴** | 1.024x |
+
+### CPU前処理 / GPU実行 内訳
+
+| データセット | Line pre | Line gpu | Static pre | Static gpu | Dyn pre | Dyn gpu |
+|---|---|---|---|---|---|---|
+| dynamic-small | 0.19ms | 34.53ms | 0.18ms | 35.25ms | 0.22ms | 35.84ms |
+| dynamic-medium | 3.34ms | 33.52ms | 3.30ms | 31.78ms | 3.33ms | 32.90ms |
+| dynamic-large | 13.30ms | **38.05ms** | 13.05ms | **24.82ms** | 13.09ms | **25.70ms** |
+
+**図: 行数スケール別の合計実行時間 / GPU実行時間**
+
+![fig5_linecount_scaling](figures/fig5_linecount_scaling.png)
+
+**図: GPU Line ウェーブ数 vs 実行時間比率**
+
+![fig6_gpu_line_waves](figures/fig6_gpu_line_waves.png)
+
+### 考察
+
+- **dynamic-small（0.07 波）**: 全 25K スレッドが 1 波以内 → GPU Line が Static を 2% 上回る
+- **dynamic-medium（1.44 波）**: 1 波を超え始める → Line が Static より 5% 遅い
+- **dynamic-large（5.74 波）**: 6 波に分割 → **Line の GPU実行が Static の 1.53 倍遅い（38ms vs 24.8ms）**
+
+> [!NOTE]
+> CPU前処理の差はほぼ同一（large: Line=13.3ms, Static=13.1ms）。  
+> ボトルネックは **GPU カーネル実行時間** のみ。ウェーブ分割のスケジューリングオーバーヘッドが原因。
+
+Chunk Static（2M行、LPC=8）のスレッド数 = 2M/8 = **250K** → 1 波以内に収まるため大規模データで有利。
+
+> **結論**: GPU Line は行数が GPU の同時実行スレッド数（RTX 5090: 348K）を大きく超えると  
+> Chunk-based 手法に対して明確に劣後する（5.74 波で **35% 遅い**）。
+
+---
+
 ## 6. 全データセット最終まとめ
 
 | データセット | 行長分布パターン | SD | 行数 | Dyn/Sta比 | Dynamic 有利? |
