@@ -25,6 +25,14 @@
 > **仮説支持**: Dynamic の遅さは CPU前処理（O(n_lines) の文字数スキャン）に起因する。  
 > GPU 実行自体は Dynamic の方が速く、理論通り負荷分散の効果が出ている。
 
+> [!NOTE]
+> 下記の数値は初回計測値です。再実験（3回平均）の正確な値は
+> `fig4_experiment_a_breakdown.png` に示す通りです（Static: 19.8ms+42ms=61.8ms / Dynamic: 23.2ms+46ms=69.2ms）。
+
+**図: enwik8 CPU前処理 vs GPU実行 内訳**
+
+![fig4_experiment_a_breakdown](figures/fig4_experiment_a_breakdown.png)
+
 ---
 
 ## 実験 B: データセット別の性能比較
@@ -168,6 +176,14 @@
 
 **Dynamic はすべての条件で Static 以下だった。**
 
+**図: 全手法×全データセット 合計実行時間**
+
+![fig1_total_time](figures/fig1_total_time.png)
+
+**図: Dynamic/Static 比率 と CPU前処理コスト**
+
+![fig2_ratio_and_preprocess](figures/fig2_ratio_and_preprocess.png)
+
 #### 考察
 
 行長のばらつき（SD）が大きくなると、Dynamic が有利になるという当初の仮説は**確認できなかった**。
@@ -185,6 +201,10 @@ CPU前処理コストについて:
   → GPU 実行時間（~63ms）の5%以上に相当し無視できない
 - 少行データ（7.6K〜157K行）: Static 0.3〜1.4ms / Dynamic 0.3〜1.5ms  
   → ほぼ同等（差 < 0.1ms）
+
+**図: CPU前処理 vs GPU実行 内訳（Static / Dynamic 比較）**
+
+![fig3_breakdown](figures/fig3_breakdown.png)
 
 ---
 
@@ -238,6 +258,14 @@ Dynamic の文字数均等化により、この不均衡が解消されるはず
 Dynamic の有利・不利を決めるのは **SD（標準偏差）ではなく、行長の空間的局在性（ブロック性）**。  
 短行と長行が混在していれば Static でも均等化されるが、  
 **連続ブロックとして出現する場合のみ Dynamic が有効**。
+
+**図: 行数 vs Dyn/Sta 比率（散布図）**
+
+![fig4_linecount_vs_ratio](figures/fig4_linecount_vs_ratio.png)
+
+> [!NOTE]
+> Blocked（196K行）は y < 1.0（Dynamic 有利ゾーン）に位置し、他の4点（y > 1.0）と明確に分離している。  
+> 行数ではなく「行長のブロック性」が決め手であることが視覚的に示されている。
 
 実用場面としては:
 - ログファイル（ヘッダー行が短く、本文が長い）
