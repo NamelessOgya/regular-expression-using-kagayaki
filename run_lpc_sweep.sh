@@ -169,7 +169,7 @@ with open('$WIKI_FILE', encoding='utf-8', errors='ignore') as f:
             fi
         done
 
-        python3 /app/scripts/aggregate_sweep.py "$MANIFEST" "${RUN_OUT}/${STRATEGY_DIR}/summary.csv"
+        python3 scripts/aggregate_sweep.py "$MANIFEST" "${RUN_OUT}/${STRATEGY_DIR}/summary.csv"
         echo "  [LPC=$LPC Run$i] Summary -> ${RUN_OUT}/${STRATEGY_DIR}/summary.csv"
     done
 

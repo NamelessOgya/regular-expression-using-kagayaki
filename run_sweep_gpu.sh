@@ -144,7 +144,7 @@ for size in "${SIZES[@]}"; do
     fi
 done
 
-python3 /app/scripts/aggregate_sweep.py "$MANIFEST_LINE" "${DIR_LINE}/summary.csv"
+python3 scripts/aggregate_sweep.py "$MANIFEST_LINE" "${DIR_LINE}/summary.csv"
 echo "[GPU Line] Summary -> ${DIR_LINE}/summary.csv"
 
 # --------------------------------------------------------
@@ -178,7 +178,7 @@ for size in "${SIZES[@]}"; do
     fi
 done
 
-python3 /app/scripts/aggregate_sweep.py "$MANIFEST_CHUNK" "${DIR_CHUNK}/summary.csv"
+python3 scripts/aggregate_sweep.py "$MANIFEST_CHUNK" "${DIR_CHUNK}/summary.csv"
 echo "[GPU Chunk] Summary -> ${DIR_CHUNK}/summary.csv"
 
 # --------------------------------------------------------
@@ -212,7 +212,7 @@ for size in "${SIZES[@]}"; do
     fi
 done
 
-python3 /app/scripts/aggregate_sweep.py "$MANIFEST_CHUNK_DYN" "${DIR_CHUNK_DYN}/summary.csv"
+python3 scripts/aggregate_sweep.py "$MANIFEST_CHUNK_DYN" "${DIR_CHUNK_DYN}/summary.csv"
 echo "[GPU Chunk Dynamic] Summary -> ${DIR_CHUNK_DYN}/summary.csv"
 
 echo ""

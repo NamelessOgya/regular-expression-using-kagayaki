@@ -53,7 +53,7 @@ while [ "$s" -lt "$MAX_CHARS" ]; do
 done
 SIZES+=("$MAX_CHARS")
 
-BINARY="./run_benchmark.asan"
+BINARY="./run_benchmark.out"
 
 echo "=================================================="
 echo " CPU Benchmark Sweep"
@@ -68,8 +68,8 @@ echo "=================================================="
 echo ""
 echo "[Build] Compiling CPU benchmark binary..."
 INC="-I./include -I./src/gpu/common -I./src/gpu/line_parallel -I./src/gpu/chunk_parallel"
-CFLAGS_ASAN="-g -O1 -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra"
-LDFLAGS_ASAN="-fsanitize=address"
+CFLAGS_ASAN="-O3 -Wall -Wextra"
+LDFLAGS_ASAN=""
 
 gcc $INC $CFLAGS_ASAN -c src/cpu/nfa_cpu.c     -o nfa_cpu.o
 gcc $INC $CFLAGS_ASAN -c src/common/utils.c    -o utils.o
@@ -120,7 +120,7 @@ done
 echo ""
 echo "[Summary] Aggregating results..."
 
-python3 /app/scripts/aggregate_sweep.py "$MANIFEST" "$SUMMARY"
+python3 scripts/aggregate_sweep.py "$MANIFEST" "$SUMMARY"
 
 echo ""
 echo "=================================================="
