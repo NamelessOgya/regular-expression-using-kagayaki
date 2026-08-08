@@ -651,19 +651,34 @@ python3 sprints/001/plot_results.py
 - それらの特徴量と Dyn/Sta 比率・Line/Chunk 比率の相関を調べる
 - 「どのパターンなら Dynamic が有利か」を予測する閾値・ルールを導出する
 
-#### B. GPU Line が「25K 行をフル活用できない」状況の設計と検証
+#### B. ~~GPU Line が「25K 行をフル活用できない」状況の設計と検証~~　→ ✅ 実験 E・F にて実施済み
 
-- 現在の varied（25K行）・extreme（7.6K行）では GPU Line が最速
-- これは GPU スレッド数 ≈ 行数 でスレッドが十分に並列動作できているため
-- **行数が GPU の並列度限界を超えるデータ**を設計して GPU Line の限界を検証する
+実験 E（uniform×行数スケール）と実験 F（blocked×行数スケール）で完了。主要な知見：
 
-#### C. Dynamic 前処理の GPU 実装
+- **Dynamic は GPU 粒度で Line を超えられない構造的制約がある**  
+  GPU Line は「1スレッド = 1行」で最小粒度を実現済み。Dynamic が達成できる最良は「1長行 = 1チャンク」であり、Line がすでにそれを実現しているため GPU 実行時間で Line を上回れない。  
+  （GPU 実行のみで比較: blocked-large で Line=24.63ms vs Dynamic=24.94ms ≈ 同等）
 
-- 現在の Dynamic チャンク境界計算は CPU で O(n_lines) スキャン
-- GPU 上で Prefix Sum を用いて並列化すれば O(log n) に削減できる可能性がある
-- CPU 前処理差（3.4ms）の解消が全体性能に与える影響を検証する
+- **Dynamic の CPU前処理コストは O(n_lines) で短行が増えると不利になる**  
+  blocked-large（2M短行+6K長行）: Dynamic_pre=12.36ms vs Line_pre=10.14ms（差=2.22ms）。  
+  GPU 節約効果（Static比 8ms 速い）は存在するが、Line との比較では前処理コスト差だけで負ける。
+
+#### C. Dynamic 前処理の GPU 実装（最優先）
+
+**実験 F の結果から最も重要な Next Action に格上げ。**
+
+- 現在の Dynamic チャンク境界計算は **CPU で O(n_lines) テキストスキャン**
+- これが「大行数×短行多量」シナリオで Dynamic の致命的なボトルネックとなっている
+- GPU 上で **Prefix Sum（並列累積和）** を用いた行境界検出・チャンク境界計算に置き換えれば O(log n) に削減可能
+- blocked-large での想定効果: Dyn_pre が 12.36ms → ~0.5ms 程度に削減  
+  → Dynamic の total = 0.5ms（pre）+ 24.94ms（gpu）= 25.4ms となり、Line（34.8ms）を大幅に下回る
 
 #### D. アダプティブ手法選択の実装
 
-- 実行時にパターン特性（マッチ率推定・NFA 状態数）とデータ特性（行長局在性スコア）を計測し
+- 実行時にパターン特性（マッチ率推定・NFA 状態数）とデータ特性（行長局在性スコア、行数）を計測し
 - Static / Dynamic / Line を自動選択するハイブリッド実装を試作する
+- 判断基準の候補:
+  - 行数 > 348K かつ 行長 SD 低 → Static を選択
+  - 行長にブロック性あり かつ 前処理 GPU 化済み → Dynamic を選択
+  - その他 → Line を選択
+
