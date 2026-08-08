@@ -36,7 +36,7 @@ set -e
 WIKI_FILE="./data/wiki_plain.txt"
 OUT_DIR="./results/sprint001_exp_a_prime"
 N_RUNS=3
-LPC_VALUES=(1 2 4 8)
+LPC_VALUES=(1 2 4 8 16 32)
 
 echo "=============================================="
 echo " 実験 A': enwik8 × LPC スイープ（仮説検証）"
