@@ -321,7 +321,7 @@ gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSyn
 
 **図: enwik8 CPU前処理 vs GPU実行 内訳（3回平均）**
 
-![fig4_experiment_a_breakdown](figures/fig4_experiment_a_breakdown.png)
+![fig_exp_a_breakdown](figures/fig_exp_a_breakdown.png)
 
 ---
 
