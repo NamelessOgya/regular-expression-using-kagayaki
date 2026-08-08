@@ -323,6 +323,25 @@ gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSyn
 
 ![fig_exp_a_breakdown](figures/fig_exp_a_breakdown.png)
 
+### 考察: GPU Line の CPU前処理が Chunked-Static より遅い理由
+
+GPU Line は Chunked-Static より CPU前処理時間が **+2.1ms** 長い（21.9ms vs 19.8ms）。  
+これは**転送するオフセット情報の件数が LPC 倍（= 8倍）異なる**ことに起因する（推計）。
+
+| 手法 | GPU に渡すオフセット数 | 比率 |
+|---|---|---|
+| GPU Line | 831,111 件（行ごとに start/end） | × 8 |
+| Chunked-Static | 103,889 件（チャンクごとに start/end） | × 1 |
+
+- GPU Line は「各スレッドが担当する1行の位置」を事前に全行分計算してデバイスへ転送する必要がある
+- Chunked-Static は「チャンク境界（何番目の行から何番目の行まで）」だけを渡し、チャンク内の行位置は GPU カーネルが実行時にスキャンして取得する
+- LPC=8 のため Chunked-Static の転送件数は GPU Line の **1/8** となり、この差が ~2ms として現れる
+
+> [!NOTE]
+> 上記のオフセット件数は理論的推計値（`int64` 仮定）。実測には CUDA プロファイラが必要。  
+> ただし、比率が LPC に比例するという構造は実装に依存しない論理的帰結であり、  
+> 実験 C の LPC スイープで LPC が大きいほど Chunked-Static の前処理が速くなる傾向が間接的な裏付けとなっている。
+
 ---
 
 ## 4. 実験 B: データセット別の性能比較（3回平均）
