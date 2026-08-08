@@ -17,8 +17,8 @@ NFA は Thompson の構成法で構築し、部分一致検索（O(L × m)、L: 
 |---|---|---|---|
 | CPU | `nfa_cpu.c` | シリアル（1スレッド） | 1 |
 | **GPU Line** | `src/gpu/line_parallel/nfa_gpu.cu` | **1スレッド = 1行** | n_lines |
-| **GPU Chunk Static** | `src/gpu/chunk_parallel/nfa_gpu_chunk.cu` | **1スレッド = LPC 行（固定）** | ⌈n_lines / LPC⌉ |
-| **GPU Chunk Dynamic** | `src/gpu/chunk_parallel/nfa_gpu_chunk.cu` | **1スレッド = 文字数が均等になるチャンク** | ⌈n_lines / LPC⌉（目標） |
+| **Chunked-Static** | `src/gpu/chunk_parallel/nfa_gpu_chunk.cu` | **1スレッド = LPC 行（固定）** | ⌈n_lines / LPC⌉ |
+| **Chunked-Dynamic** | `src/gpu/chunk_parallel/nfa_gpu_chunk.cu` | **1スレッド = 文字数が均等になるチャンク** | ⌈n_lines / LPC⌉（目標） |
 
 デフォルト LPC（Lines Per Chunk）= 8。CUDA ブロックサイズ = 256 スレッド。
 
@@ -40,7 +40,7 @@ for each thread tid:
 - **弱点**: 行長が不均一な場合、長い行を処理するスレッドがボトルネックになりワープ内でアイドルスレッドが発生する
 - **CPU前処理**: 行オフセット計算 O(text_bytes) のみ。チャンク境界計算は不要
 
-#### (2) GPU Chunk Static（固定行数チャンク分割）
+#### (2) Chunked-Static（固定行数チャンク分割）
 
 テキストを **LPC 行ごとの固定サイズチャンク**に分割し、1 スレッドが 1 チャンクを担当する。  
 チャンク境界は **行数のみ**で決まり、各行の文字数（処理の重さ）は考慮しない。
@@ -76,7 +76,7 @@ for (int c = 0; c < n_chunks; c++) {
 - **弱点**: チャンク内の行長が不均一な場合、スレッド間で処理時間が大きく異なる（ロードインバランス）
 - **CPU前処理**: 行分割 O(text_bytes) + 固定チャンク境界計算 O(n_chunks)
 
-#### (3) GPU Chunk Dynamic（文字数ベース動的チャンク分割）
+#### (3) Chunked-Dynamic（文字数ベース動的チャンク分割）
 
 累積文字数が均等になるようにチャンク境界を**動的に**決定する手法。  
 Static との違いは「境界を行数で切るか、文字数の合計で切るか」の1点のみ。スレッド数は同じ。
@@ -299,11 +299,14 @@ gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSyn
 **データ**: `wiki_plain.txt`（95,909,488 文字、3回平均）  
 **結果ディレクトリ**: `results/run_20260807_09_30_15/`
 
-| 手法 | CPU前処理(ms) | GPU実行(ms) | 合計(ms) | Dyn/Sta比 |
-|---|---|---|---|---|
-| GPU Line | 21.94 | 40.39 | 63.99 | — |
-| GPU Chunk Static | 19.84 | 42.29 | 63.54 | 1.000 |
-| **GPU Chunk Dynamic** | **23.16** | **46.48** | **71.43** | **1.124x（Dynamic が遅い）** |
+| 手法 | CPU前処理(ms) | GPU実行(ms) | 合計(ms) | Line/Sta | Line/Dyn | Dyn/Sta |
+|---|---|---|---|---|---|---|
+| **GPU Line** | 21.94 | 40.39 | **63.99** | — | — | — |
+| Chunked-Static | 19.84 | 42.29 | 63.54 | **1.007x** | — | 1.000 |
+| Chunked-Dynamic | 23.16 | 46.48 | 71.43 | **0.896x ✅** | — | 1.124x |
+
+> Line/Sta = GPU Line の合計時間 ÷ Chunked-Static の合計時間（<1.0 なら Line が速い）  
+> enwik8 ではすべての手法がほぼ同等（63〜71ms）。Line と Static はほぼ同速（1.007x）。
 
 ### 内訳分析
 
@@ -329,17 +332,18 @@ gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSyn
 
 ### 4.1 全手法×全データセット 比較表
 
-| データセット | 合計文字数 | GPU Line (ms) | Chunk Static (ms) | Chunk Dynamic (ms) | Dyn/Sta比 |
-|---|---|---|---|---|---|
-| enwik8 | 95,909,488 | 63.99 | 63.54 | 71.43 | 1.124x |
-| uniform.txt | 6,761,094 | 11.28 | 11.11 | 11.74 | 1.057x |
-| varied.txt | 10,025,841 | 11.32 | 14.33 | 16.65 | 1.162x |
-| varied_extreme.txt | 10,016,169 | 11.29 | 16.60 | 18.78 | 1.131x |
-| blocked.txt | 6,916,725 | 12.89 | 19.15 | 12.97 | **0.677x** |
+| データセット | GPU Line (ms) | Chunked-Static (ms) | Chunked-Dynamic (ms) | Line/Sta | Line/Dyn | Dyn/Sta | **最速** |
+|---|---|---|---|---|---|---|---|
+| enwik8 | **63.99** | **63.54** | 71.43 | 1.007x | 0.896x ✅ | 1.124x | **Static ≈ Line** |
+| uniform.txt | **11.28** | **11.11** | 11.74 | 1.015x | 0.961x ✅ | 1.057x | **Static ≈ Line** |
+| varied.txt | **11.32** | 14.33 | 16.65 | 0.790x ✅ | 0.680x ✅ | 1.162x | **Line** |
+| varied_extreme.txt | **11.29** | 16.60 | 18.78 | 0.680x ✅ | 0.601x ✅ | 1.131x | **Line** |
+| blocked.txt | 12.89 | 19.15 | **12.97** | 0.673x ✅ | **0.993x** | **0.677x ✅** | **Dynamic ≈ Line** |
 
 > [!IMPORTANT]
-> blocked.txt でのみ Dynamic が Static を上回る（Dyn/Sta = 0.677x、**32% 高速**）。
-> 他の 4 データセットではすべて Static が有利。
+> **Line vs Static**: varied / varied_extreme では Line が **20〜32% 速い**。uniform / enwik8 では拮抗。  
+> **Line vs Dynamic**: blocked.txt でのみほぼ同速（0.993x = 0.7% 差）。他は Line が 4〜40% 速い。  
+> **Dynamic vs Static**: blocked.txt でのみ Dynamic が **32% 速い**。他はすべて Static が有利。
 
 **図: 全手法×全データセット 合計実行時間**
 
@@ -435,11 +439,11 @@ gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSyn
 
 ### 計測結果（30 パターン平均、3回平均）
 
-| データセット | GPU Line (ms) | Chunk Static (ms) | Chunk Dynamic (ms) | Line/Static | Dyn/Static |
-|---|---|---|---|---|---|
-| dynamic-small | 34.70 | 35.40 | 36.05 | 0.980x ✅ | 1.019x |
-| dynamic-medium | 36.85 | 35.08 | 36.23 | 1.050x | 1.033x |
-| dynamic-large | **51.35** | **37.88** | **38.79** | **1.356x 🔴** | 1.024x |
+| データセット | GPU Line (ms) | Chunked-Static (ms) | Chunked-Dynamic (ms) | Line/Sta | Line/Dyn | Dyn/Sta |
+|---|---|---|---|---|---|---|
+| dynamic-small | **34.70** | 35.40 | 36.05 | 0.980x ✅ | **0.963x ✅** | 1.019x |
+| dynamic-medium | 36.85 | **35.08** | 36.23 | 1.050x | 1.017x | 1.033x |
+| dynamic-large | **51.35** | **37.88** | **38.79** | **1.356x 🔴** | **1.323x 🔴** | 1.024x |
 
 ### CPU前処理 / GPU実行 内訳
 
@@ -467,7 +471,7 @@ gpu_exec_time = t2 - t1  : cudaMemcpy H→D + カーネル実行 + cudaDeviceSyn
 > CPU前処理の差はほぼ同一（large: Line=13.3ms, Static=13.1ms）。  
 > ボトルネックは **GPU カーネル実行時間** のみ。ウェーブ分割のスケジューリングオーバーヘッドが原因。
 
-Chunk Static（2M行、LPC=8）のスレッド数 = 2M/8 = **250K** → 1 波以内に収まるため大規模データで有利。
+Chunked-Static（2M行、LPC=8）のスレッド数 = 2M/8 = **250K** → 1 波以内に収まるため大規模データで有利。
 
 > **結論**: GPU Line は行数が GPU の同時実行スレッド数（RTX 5090: 348K）を大きく超えると  
 > Chunk-based 手法に対して明確に劣後する（5.74 波で **35% 遅い**）。
@@ -490,11 +494,11 @@ Chunk Static（2M行、LPC=8）のスレッド数 = 2M/8 = **250K** → 1 波以
 
 ### 計測結果（30 パターン平均、3回平均）
 
-| データセット | GPU Line (ms) | Chunk Static (ms) | Chunk Dynamic (ms) | Line/Sta | Dyn/Sta | **最速** |
-|---|---|---|---|---|---|---|
-| blocked-small | **13.33** | 18.76 | 15.56 | 0.710x | 0.829x | **Line** |
-| blocked-medium | **17.52** | 24.31 | **17.51** | 0.721x | 0.720x | **Line ≈ Dynamic** |
-| blocked-large | **34.80** | 43.34 | 37.34 | 0.803x | 0.861x | **Line** |
+| データセット | GPU Line (ms) | Chunked-Static (ms) | Chunked-Dynamic (ms) | Line/Sta | Line/Dyn | Dyn/Sta | **最速** |
+|---|---|---|---|---|---|---|---|
+| blocked-small | **13.33** | 18.76 | 15.56 | 0.710x ✅ | 0.857x ✅ | 0.829x ✅ | **Line** |
+| blocked-medium | **17.52** | 24.31 | **17.51** | 0.721x ✅ | **1.001x** | 0.720x ✅ | **Line ≈ Dynamic** |
+| blocked-large | **34.80** | 43.34 | 37.34 | 0.803x ✅ | 0.932x ✅ | 0.861x ✅ | **Line** |
 
 ### CPU前処理 / GPU実行 内訳
 
