@@ -423,17 +423,17 @@ Chunked-Static（1スレッド直列）:
 #### ① Chunked-Static が圧倒的に強いパターン TOP 5 (Static が最大 1.40 倍高速)
 **特徴**: 多分岐選択・複雑な Alternation 句（NFA の状態数が多く計算密度が高いパターン）
 
-* `(the|and|for|are|but|not|his|has|was|can)`: GPU Line 49.53ms vs **Static 35.45ms (Static 40%速)** ✅
-* `(the|and|for|are|but|not|his)`: GPU Line 40.04ms vs **Static 29.25ms (Static 37%速)** ✅
-* `(the|and|for|are|but|not|his|has)`: GPU Line 41.06ms vs **Static 32.59ms (Static 26%速)** ✅
+* `(the\|and\|for\|are\|but\|not\|his\|has\|was\|can)`: GPU Line 49.53ms vs **Static 35.45ms (Static 40%速)** ✅
+* `(the\|and\|for\|are\|but\|not\|his)`: GPU Line 40.04ms vs **Static 29.25ms (Static 37%速)** ✅
+* `(the\|and\|for\|are\|but\|not\|his\|has)`: GPU Line 41.06ms vs **Static 32.59ms (Static 26%速)** ✅
 
 > **理由**: NFA 状態遷移計算が重いパターンでは、1スレッドあたりの計算量が増え、GPU Line の「固定管理オーバーヘッド」に対する計算密度の割合が高まる。LPC=8 で管理コストを 1/8 に削減する Chunked-Static が大勝する。
 
 #### ② GPU Line が圧倒的に強いパターン TOP 5 (Line が最大 1.64 倍高速)
 **特徴**: ワイルドカード検索・部分一致（ワープダイバージェンスが顕著なパターン）
 
-* `cat|dog`: **GPU Line 37.36ms** vs Static 61.15ms **(Line 64%速)** ⚡
-* `(19|20).+`: **GPU Line 32.45ms** vs Static 47.52ms **(Line 46%速)** ⚡
+* `cat\|dog`: **GPU Line 37.36ms** vs Static 61.15ms **(Line 64%速)** ⚡
+* `(19\|20).+`: **GPU Line 32.45ms** vs Static 47.52ms **(Line 46%速)** ⚡
 * `http.+wiki`: **GPU Line 34.73ms** vs Static 49.67ms **(Line 43%速)** ⚡
 
 > **理由**: `.+` 等のワイルドカードは行長依存の長尾遅延を発生させ、Static (8行直列) ではワープダイバージェンスが深刻化する。GPU Line は 1行1スレッドの完全並列度で遅延を押し潰す。
