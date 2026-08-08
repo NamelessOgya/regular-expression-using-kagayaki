@@ -342,6 +342,33 @@ GPU Line は Chunked-Static より CPU前処理時間が **+2.1ms** 長い（21.
 > ただし、比率が LPC に比例するという構造は実装に依存しない論理的帰結であり、  
 > 実験 C の LPC スイープで LPC が大きいほど Chunked-Static の前処理が速くなる傾向が間接的な裏付けとなっている。
 
+### 考察: Chunked-Dynamic の CPU前処理が Chunked-Static より遅い理由
+
+Chunked-Dynamic は Chunked-Static より CPU前処理時間が **+3.4ms** 長い（23.2ms vs 19.8ms）。  
+これは Dynamic 固有の**文字数均等化スキャン**（O(n_lines) ループ）が追加されるためである。
+
+| 手法 | 処理内容 | コスト |
+|---|---|---|
+| Chunked-Static | ① テキストスキャン（'\n'検出）+ ② 固定境界計算 | O(text_bytes) + O(n_chunks) |
+| Chunked-Dynamic | ① テキストスキャン（'\n'検出）+ ② **文字数累積スキャン** + ③ 境界確定 | O(text_bytes) + **O(n_lines)** + O(n_chunks) |
+
+Dynamic に固有の②のループ（概念コード）：
+
+```python
+running_chars = 0
+for each line i:           # ← 831,111 回
+    running_chars += h_len[i]
+    if running_chars >= target_chars:
+        emit chunk boundary
+        running_chars = 0
+```
+
+- **enwik8（831K行）では +3.4ms** として現れる
+- 行数が増えると O(n_lines) に比例して拡大する
+- 実験 F（blocked-large, 2M行）では Dyn_pre = **12.36ms** まで膨らんでいた（Static_pre = 10.20ms の 1.21倍）
+
+> このスキャンコストの削減が「Dynamic 前処理の GPU 化（Prefix Sum）」という Next Action C の動機である。
+
 ---
 
 ## 4. 実験 B: データセット別の性能比較（3回平均）
