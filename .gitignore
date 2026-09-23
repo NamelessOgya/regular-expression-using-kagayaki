@@ -18,3 +18,6 @@ chokosen-loveti.*
 *.asansprints/001/figures/fig1_execution_time_breakdown.png
 sprints/001/figures/fig2_dyn_sta_ratio_vs_sd.png
 sprints/001/figures/fig3_gpu_improvement_vs_pre_cost.png
+
+build/**
+*.asan
