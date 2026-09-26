@@ -169,8 +169,18 @@ $$T_{\text{GPU\_Dyn}}(N) = \frac{N_{\text{lines}}(N) \times C_{\text{pre\_scan}}
 ---
 
 ## 3. 理論モデルと実測値のスケール突合結果
- 
-![文字数スケーリング分析](figures/fig_exp003_scaling_analysis.png)
+
+<div align="center" style="margin: 20px 0;">
+  <img src="figures/fig_exp003_scaling_analysis.png" alt="Figure 1: Scaling Performance Comparison" width="100%" style="max-width: 950px; border: 1px solid #d0d7de; border-radius: 6px;" />
+  <p align="justify" style="max-width: 950px; font-size: 0.9em; line-height: 1.5; color: #333; margin-top: 10px;">
+    <b>Figure 1.</b> Scaling performance evaluation comparing theoretical execution time models (dashed curves) against empirical benchmark measurements (points) across target text lengths spanning from $10^4$ to $10^8$ characters (log-log scale).
+    <b>(a)</b> 2-way alternation <code>(cat|dog)</code> ($|Q|=10$),
+    <b>(b)</b> 8-way alternation <code>(zx01|...|zx08)</code> ($|Q|=40$),
+    <b>(c)</b> 10-word dictionary alternation ($|Q|=50$), and
+    <b>(d)</b> wildcard prefix <code>http.+</code> ($|Q|=12$).
+    Hardware environment: AMD Ryzen 7 7700 @ 4.5 GHz (CPU) and NVIDIA GeForce RTX 5090 @ 3.09 GHz, 170 SMs (GPU).
+  </p>
+</div>
 
 ### 3.1 理論通りの 2 つの物理的境界挙動
 

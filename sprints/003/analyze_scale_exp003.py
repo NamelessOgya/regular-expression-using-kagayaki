@@ -118,13 +118,13 @@ def calc_theory_for_size(n_chars, pat):
 
 def format_pattern_for_table(p):
     if "zx01|zx02|zx03|zx04|zx05|zx06|zx07|zx08|zx09" in p:
-        return "`zx01 .. zx32` (32分岐)"
+        return "`zx01..zx32` (32-way)"
     elif "zx01|zx02|zx03|zx04|zx05|zx06|zx07|zx08" in p:
-        return "`zx01 .. zx08` (8分岐)"
+        return "`zx01..zx08` (8-way)"
     elif "zx01|zx02|zx03|zx04" in p:
-        return "`zx01 .. zx04` (4分岐)"
+        return "`zx01..zx04` (4-way)"
     elif "the|and|for|are|but" in p:
-        return "`the, and, for...` (10語)"
+        return "`the, and, for...` (10-word)"
     else:
         return f"`{p.replace('|', '&#124;')}`"
 
@@ -148,56 +148,57 @@ def main():
     ]
     rep_patterns = [p for p in rep_patterns if p in patterns] or patterns[:4]
     
-    # グラフ描画 (2x2 グリッド)
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.patch.set_facecolor('#0F1117')
+    # グラフ描画 (2x2 グリッド, 論文出版品質)
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9.5), dpi=300)
+    fig.patch.set_facecolor('white')
     axes = axes.flatten()
     
     # 連続的な理論プロット用の点群
-    dense_sizes = np.logspace(4, 8, 50) # 10^4 から 10^8
+    dense_sizes = np.logspace(4, 8, 100) # 10^4 から 10^8
+    
+    sublabels = ["(a)", "(b)", "(c)", "(d)"]
     
     for idx, pat in enumerate(rep_patterns):
         ax = axes[idx]
-        ax.set_facecolor('#1A1D2E')
-        ax.tick_params(colors='white')
-        ax.spines['bottom'].set_color('#555'); ax.spines['left'].set_color('#555')
-        ax.spines['top'].set_visible(False);  ax.spines['right'].set_visible(False)
-        ax.grid(True, color='#333', linestyle='--', alpha=0.5)
+        ax.set_facecolor('white')
+        ax.tick_params(colors='#111111', labelsize=9)
+        for spine in ['bottom', 'left', 'top', 'right']:
+            ax.spines[spine].set_color('#333333')
+            ax.spines[spine].set_linewidth(0.8)
+        ax.grid(True, color='#E0E0E0', linestyle=':', linewidth=0.6, alpha=0.8)
         ax.set_xscale('log')
         ax.set_yscale('log')
         
-        # 1. 理論線の計算
+        # 1. 理論線の計算 (破線)
         theory_cpu = [calc_theory_for_size(s, pat)['cpu_o3_ms'] for s in dense_sizes]
         theory_line = [calc_theory_for_size(s, pat)['gpu_line_ms'] for s in dense_sizes]
         theory_static = [calc_theory_for_size(s, pat)['gpu_chunk_static_ms'] for s in dense_sizes]
         
-        ax.plot(dense_sizes, theory_cpu, '--', color='#FF6B6B', alpha=0.7, label='Theory: CPU (-O3)')
-        ax.plot(dense_sizes, theory_line, '--', color='#339AF0', alpha=0.7, label='Theory: GPU Line')
-        ax.plot(dense_sizes, theory_static, '--', color='#51CF66', alpha=0.7, label='Theory: Chunk-Static')
+        ax.plot(dense_sizes, theory_cpu, linestyle='--', color='#C92A2A', linewidth=1.5, alpha=0.85, label='Theory: CPU (-O3)')
+        ax.plot(dense_sizes, theory_line, linestyle='--', color='#1864AB', linewidth=1.5, alpha=0.85, label='Theory: GPU Line')
+        ax.plot(dense_sizes, theory_static, linestyle='--', color='#2B8A3E', linewidth=1.5, alpha=0.85, label='Theory: Chunk-Static')
         
-        # 2. 実測値のプロット
+        # 2. 実測値のプロット (マーカー)
         meas_sizes = [s for s in SCALE_SIZES if s in scale_data and pat in scale_data[s].get('cpu_o3', {})]
         meas_cpu = [scale_data[s]['cpu_o3'][pat]['total_time_ms'] for s in meas_sizes]
         meas_line = [scale_data[s]['gpu_line'][pat]['total_time_ms'] for s in meas_sizes]
         meas_static = [scale_data[s]['gpu_chunk_static'][pat]['total_time_ms'] for s in meas_sizes]
         
-        ax.plot(meas_sizes, meas_cpu, 'o', color='#FA5252', markersize=7, label='Measured: CPU (-O3)')
-        ax.plot(meas_sizes, meas_line, 's', color='#228BE6', markersize=7, label='Measured: GPU Line')
-        ax.plot(meas_sizes, meas_static, '^', color='#40C057', markersize=7, label='Measured: Chunk-Static')
+        ax.plot(meas_sizes, meas_cpu, marker='o', markersize=6.5, color='#C92A2A', markeredgecolor='white', markeredgewidth=0.8, linestyle='None', label='Measured: CPU (-O3)')
+        ax.plot(meas_sizes, meas_line, marker='s', markersize=6.5, color='#1864AB', markeredgecolor='white', markeredgewidth=0.8, linestyle='None', label='Measured: GPU Line')
+        ax.plot(meas_sizes, meas_static, marker='^', markersize=7.0, color='#2B8A3E', markeredgecolor='white', markeredgewidth=0.8, linestyle='None', label='Measured: Chunk-Static')
         
-        safe_p = format_pattern_for_table(pat).replace('`', '')
-        ax.set_title(f"Pattern: {safe_p} (|Q|={get_nfa_states(pat)})", color='white', fontsize=12, fontweight='bold')
-        ax.set_xlabel("Target Text Length (Characters, log scale)", color='white', fontsize=10)
-        ax.set_ylabel("Execution Time (ms, log scale)", color='white', fontsize=10)
-        ax.legend(facecolor='#1A1D2E', edgecolor='#555', labelcolor='white', fontsize=8, loc='upper left')
+        safe_p = format_pattern_for_table(pat).replace('`', '').replace('&#124;', '|')
+        ax.set_title(f"{sublabels[idx]} Pattern: {safe_p} (|Q|={get_nfa_states(pat)})", color='#111111', fontsize=10.5, fontweight='bold', pad=8)
+        ax.set_xlabel("Target Text Length $N$ [characters]", color='#111111', fontsize=9.5)
+        ax.set_ylabel("Execution Time $T$ [ms]", color='#111111', fontsize=9.5)
+        ax.legend(facecolor='white', edgecolor='#CCCCCC', framealpha=0.95, fontsize=8, loc='upper left')
     
     plt.tight_layout()
     fig_path = f"{OUT_FIG_DIR}/fig_exp003_scaling_analysis.png"
-    plt.savefig(fig_path, dpi=150, facecolor='#0F1117')
+    plt.savefig(fig_path, dpi=300, facecolor='white', edgecolor='none')
     print(f"Scaling plot saved -> {fig_path}")
-    
-    # レポート Markdown の生成
-    generate_markdown_report(patterns, scale_data, fig_path)
+
 
 def generate_markdown_report(patterns, scale_data, fig_path):
     with open(OUT_MD, "w", encoding="utf-8") as f:

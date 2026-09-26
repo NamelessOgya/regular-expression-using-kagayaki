@@ -149,35 +149,39 @@ def main():
         
         print(f"{pat:<35} | {q:>4} | {c_o3:>10.2f}  | {c_asan:>10.2f}  | {g_line:>10.2f}  | {g_sta:>10.2f}  | {g_dyn:>10.2f} ")
     
-    # グラフ描画
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-    fig.patch.set_facecolor('#0F1117')
+    # グラフ描画 (論文出版品質)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5), dpi=300)
+    fig.patch.set_facecolor('white')
     for ax in axes:
-        ax.set_facecolor('#1A1D2E')
-        ax.tick_params(colors='white')
-        ax.spines['bottom'].set_color('#555'); ax.spines['left'].set_color('#555')
-        ax.spines['top'].set_visible(False);  ax.spines['right'].set_visible(False)
-        ax.grid(axis='y', color='#333', linestyle='--', alpha=0.5)
+        ax.set_facecolor('white')
+        ax.tick_params(colors='#111111', labelsize=8.5)
+        for spine in ['bottom', 'left', 'top', 'right']:
+            ax.spines[spine].set_color('#333333')
+            ax.spines[spine].set_linewidth(0.8)
+        ax.grid(axis='y', color='#E0E0E0', linestyle=':', linewidth=0.6, alpha=0.8)
     
     # Subplot 1: CPU vs GPU スピードアップ比
     ax1 = axes[0]
-    pats_short = [p if len(p) <= 20 else p[:17] + "..." for p in patterns]
+    pats_short = []
+    for p in patterns:
+        clean = format_pattern_for_table(p).replace('`', '').replace('&#124;', '|')
+        pats_short.append(clean if len(clean) <= 22 else clean[:19] + "...")
     x = np.arange(len(patterns))
-    width = 0.35
+    width = 0.45
     
     cpu_times = [results.get('cpu_o3', {}).get(p, {}).get('total_time_ms', 0.0) for p in patterns]
     gpu_times = [results.get('gpu_chunk_static', {}).get(p, {}).get('total_time_ms', 0.0) for p in patterns]
     speedups = [c / g if g > 0 else 0 for c, g in zip(cpu_times, gpu_times)]
     
-    bars = ax1.bar(x, speedups, width=0.5, color='#4DABF7', edgecolor='#339AF0')
+    bars = ax1.bar(x, speedups, width=width, color='#1971C2', edgecolor='#0C4A6E', linewidth=0.8)
     for bar, sp in zip(bars, speedups):
-        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f"{sp:.1f}x", 
-                 ha='center', va='bottom', color='white', fontweight='bold', fontsize=9)
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.3, f"{sp:.1f}x", 
+                 ha='center', va='bottom', color='#111111', fontweight='bold', fontsize=8)
     
     ax1.set_xticks(x)
-    ax1.set_xticklabels(pats_short, rotation=35, ha='right', color='white', fontsize=9)
-    ax1.set_ylabel("GPU Speedup vs CPU (-O3)", color='white', fontsize=11)
-    ax1.set_title("GPU Speedup over Single-Thread CPU (Ryzen 7 7700 vs RTX 5090)", color='white', fontsize=12, fontweight='bold')
+    ax1.set_xticklabels(pats_short, rotation=35, ha='right', color='#111111', fontsize=8)
+    ax1.set_ylabel("Speedup vs CPU (-O3) [x]", color='#111111', fontsize=9.5)
+    ax1.set_title("(a) GPU Speedup over Single-Thread CPU (RTX 5090 vs Ryzen 7 7700)", color='#111111', fontsize=10.5, fontweight='bold', pad=8)
     
     # Subplot 2: GPU手法間実測 vs 理論予測 (Line / Static 比)
     ax2 = axes[1]
@@ -193,22 +197,22 @@ def main():
         ps = theory[p]['gpu_chunk_static_pred_ms']
         theory_ratios.append(pl / ps)
     
-    ax2.plot(x, measured_ratios, 'o-', color='#51CF66', label='Measured (Line / Static)', linewidth=2.5, markersize=7)
-    ax2.plot(x, theory_ratios, 's--', color='#FF922B', label='Theoretical Model', linewidth=2, markersize=6)
-    ax2.axhline(1.0, color='#FFD700', linestyle=':', label='Parity (1.0x)')
+    ax2.plot(x, measured_ratios, 'o-', color='#2B8A3E', label='Measured (Line / Static)', linewidth=1.8, markersize=6, markeredgecolor='white', markeredgewidth=0.6)
+    ax2.plot(x, theory_ratios, 's--', color='#E8590C', label='Theoretical Model', linewidth=1.5, markersize=5.5, markeredgecolor='white', markeredgewidth=0.6)
+    ax2.axhline(1.0, color='#888888', linestyle=':', linewidth=1.0, label='Parity (1.0x)')
     
     for i, (m, t) in enumerate(zip(measured_ratios, theory_ratios)):
-        ax2.text(i, m + 0.03, f"{m:.2f}x", ha='center', color='#51CF66', fontsize=8, fontweight='bold')
+        ax2.text(i, m + 0.03, f"{m:.2f}x", ha='center', color='#2B8A3E', fontsize=7.5, fontweight='bold')
     
     ax2.set_xticks(x)
-    ax2.set_xticklabels(pats_short, rotation=35, ha='right', color='white', fontsize=9)
-    ax2.set_ylabel("Speedup Ratio (Line / Chunk-Static)", color='white', fontsize=11)
-    ax2.set_title("Line vs Chunk-Static: Measured vs Theoretical Model", color='white', fontsize=12, fontweight='bold')
-    ax2.legend(facecolor='#1A1D2E', edgecolor='#555', labelcolor='white', loc='upper left')
+    ax2.set_xticklabels(pats_short, rotation=35, ha='right', color='#111111', fontsize=8)
+    ax2.set_ylabel("Performance Ratio (Line / Chunk-Static)", color='#111111', fontsize=9.5)
+    ax2.set_title("(b) Line vs Chunk-Static: Empirical vs Theoretical Model", color='#111111', fontsize=10.5, fontweight='bold', pad=8)
+    ax2.legend(facecolor='white', edgecolor='#CCCCCC', framealpha=0.95, fontsize=8, loc='upper left')
     
     plt.tight_layout()
     plot_path = f"{OUT_FIG_DIR}/fig_exp003_theory_vs_measured.png"
-    plt.savefig(plot_path, dpi=150, facecolor='#0F1117')
+    plt.savefig(plot_path, dpi=300, facecolor='white', edgecolor='none')
     print(f"\nPlot saved -> {plot_path}")
     
     # レポート Markdown の生成
@@ -217,13 +221,13 @@ def main():
 def format_pattern_for_table(p):
     """Markdown 表の列崩れを防止するための安全な表示文字列に変換"""
     if "zx01|zx02|zx03|zx04|zx05|zx06|zx07|zx08|zx09" in p:
-        return "`zx01 .. zx32` (32分岐)"
+        return "`zx01..zx32` (32-way)"
     elif "zx01|zx02|zx03|zx04|zx05|zx06|zx07|zx08" in p:
-        return "`zx01 .. zx08` (8分岐)"
+        return "`zx01..zx08` (8-way)"
     elif "zx01|zx02|zx03|zx04" in p:
-        return "`zx01 .. zx04` (4分岐)"
+        return "`zx01..zx04` (4-way)"
     elif "the|and|for|are|but" in p:
-        return "`the, and, for...` (10語)"
+        return "`the, and, for...` (10-word)"
     else:
         # パイプ文字を HTML エンティティ &#124; に置換
         return f"`{p.replace('|', '&#124;')}`"
@@ -255,7 +259,12 @@ def generate_markdown_report(patterns, results, theory, speedups, measured_ratio
         
         f.write("\n---\n\n")
         f.write("## 2. 理論モデルと実測値の突合結果\n\n")
-        f.write("![理論値と実測値の比較](figures/fig_exp003_theory_vs_measured.png)\n\n")
+        f.write("<div align=\"center\" style=\"margin: 20px 0;\">\n")
+        f.write("  <img src=\"figures/fig_exp003_theory_vs_measured.png\" alt=\"Figure 1: GPU Speedup and Theoretical Model Validation\" width=\"100%\" style=\"max-width: 950px; border: 1px solid #d0d7de; border-radius: 6px;\" />\n")
+        f.write("  <p align=\"justify\" style=\"max-width: 950px; font-size: 0.9em; line-height: 1.5; color: #333; margin-top: 10px;\">\n")
+        f.write("    <b>Figure 1.</b> Performance evaluation of Thompson NFA regular expression matching on <code>enwik8</code> (95.9 MB, 831,111 lines). <b>(a)</b> Speedup of GPU Chunk-Static over single-threaded CPU (-O3) on AMD Ryzen 7 7700 vs NVIDIA GeForce RTX 5090. <b>(b)</b> Relative execution time ratio between GPU Line-Parallel and Chunk-Static (LPC=8), comparing empirical measurements (green solid line with circle markers) against theoretical predictions (orange dashed line with square markers).\n")
+        f.write("  </p>\n")
+        f.write("</div>\n\n")
         
         f.write("### 2.1 CPU 実行速度の妥当性検証\n")
         f.write("1. **最適化 (-O3) のスループット**:\n")

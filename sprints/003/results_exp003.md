@@ -14,10 +14,10 @@
 | `(zx01)` | 5 | 317.9 | 768.5 | 2.42x | 274.1 | 230.1 | 222.8 | **1.4x** |
 | `(cat&#124;dog)` | 10 | 564.3 | 1461.6 | 2.59x | 59.2 | 71.2 | 72.5 | **7.9x** |
 | `(the&#124;and)` | 10 | 270.1 | 608.6 | 2.25x | 43.4 | 42.7 | 49.0 | **6.3x** |
-| `zx01 .. zx04` (4分岐) | 20 | 1189.8 | 2516.0 | 2.11x | 79.5 | 89.2 | 84.5 | **13.3x** |
-| `zx01 .. zx08` (8分岐) | 40 | 2147.4 | 4979.8 | 2.32x | 119.1 | 115.1 | 112.0 | **18.7x** |
-| `the, and, for...` (10語) | 50 | 847.8 | 1526.4 | 1.80x | 71.0 | 57.9 | 66.1 | **14.6x** |
-| `zx01 .. zx32` (32分岐) | 160 | 8292.7 | 15954.0 | 1.92x | 523.0 | 422.7 | 442.3 | **19.6x** |
+| `zx01..zx04` (4-way) | 20 | 1189.8 | 2516.0 | 2.11x | 79.5 | 89.2 | 84.5 | **13.3x** |
+| `zx01..zx08` (8-way) | 40 | 2147.4 | 4979.8 | 2.32x | 119.1 | 115.1 | 112.0 | **18.7x** |
+| `the, and, for...` (10-word) | 50 | 847.8 | 1526.4 | 1.80x | 71.0 | 57.9 | 66.1 | **14.6x** |
+| `zx01..zx32` (32-way) | 160 | 8292.7 | 15954.0 | 1.92x | 523.0 | 422.7 | 442.3 | **19.6x** |
 | `(19&#124;20).+` | 12 | 462.5 | 939.6 | 2.03x | 58.6 | 70.9 | 72.2 | **6.5x** |
 | `http.+` | 12 | 360.4 | 1118.4 | 3.10x | 71.9 | 69.7 | 70.7 | **5.2x** |
 
@@ -25,9 +25,12 @@
 
 ## 2. 理論モデルと実測値の突合結果
 
-![理論値と実測値の比較](figures/fig_exp003_theory_vs_measured.png)
-* **左図 (GPU Speedup over CPU)**: CPU (-O3) に対する GPU Chunk-Static の高速化倍率（実測値）
-* **右図 (Line / Static 速度比)**: GPU 手法間速度比における **理論予測値（オレンジ破線）** と **実測値（緑実線）** の直接比較プロット（1.0x より上が Chunk-Static 優位）
+<div align="center" style="margin: 20px 0;">
+  <img src="figures/fig_exp003_theory_vs_measured.png" alt="Figure 1: GPU Speedup and Theoretical Model Validation" width="100%" style="max-width: 950px; border: 1px solid #d0d7de; border-radius: 6px;" />
+  <p align="justify" style="max-width: 950px; font-size: 0.9em; line-height: 1.5; color: #333; margin-top: 10px;">
+    <b>Figure 1.</b> Performance evaluation of Thompson NFA regular expression matching on <code>enwik8</code> (95.9 MB, 831,111 lines). <b>(a)</b> Speedup of GPU Chunk-Static over single-threaded CPU (-O3) on AMD Ryzen 7 7700 vs NVIDIA GeForce RTX 5090. <b>(b)</b> Relative execution time ratio between GPU Line-Parallel and Chunk-Static (LPC=8), comparing empirical measurements (green solid line with circle markers) against theoretical predictions (orange dashed line with square markers).
+  </p>
+</div>
 
 ### 2.1 CPU 実行速度の妥当性検証
 1. **最適化 (-O3) のスループット**:
@@ -43,18 +46,13 @@
 | `(zx01)` | 5 | 1.19x | 1.09x | 整合 ✅ |
 | `(cat&#124;dog)` | 10 | 0.83x | 1.09x | 乖離 |
 | `(the&#124;and)` | 10 | 1.02x | 1.09x | 整合 ✅ |
-| `zx01 .. zx04` (4分岐) | 20 | 0.89x | 1.09x | 乖離 |
-| `zx01 .. zx08` (8分岐) | 40 | 1.04x | 1.09x | 整合 ✅ |
-| `the, and, for...` (10語) | 50 | 1.23x | 1.09x | 整合 ✅ |
-| `zx01 .. zx32` (32分岐) | 160 | 1.24x | 1.09x | 整合 ✅ |
+| `zx01..zx04` (4-way) | 20 | 0.89x | 1.09x | 乖離 |
+| `zx01..zx08` (8-way) | 40 | 1.04x | 1.09x | 整合 ✅ |
+| `the, and, for...` (10-word) | 50 | 1.23x | 1.09x | 整合 ✅ |
+| `zx01..zx32` (32-way) | 160 | 1.24x | 1.09x | 整合 ✅ |
 | `(19&#124;20).+` | 12 | 0.83x | 1.09x | 乖離 |
 | `http.+` | 12 | 1.03x | 1.09x | 整合 ✅ |
 
 ### 2.3 学術的示唆と結論
-1. **理論モデルの妥当性と勝敗判定の整合性**:
-   実測の速度比と理論モデルの予測値は、定性的な勝敗判定において 100% 一致し、数値的にも高い相関（MAPE < 12%）を示した。
-2. **CPU が理論通りで GPU が上振れる（遅めになる）理由**:
-   - **CPU**: 他スレッドや分岐の影響を受けないため、命令数 $\times$ クロック周波数の理論通りに厳密に $O(N)$ で動作する。
-   - **GPU**: 実測値には CPU 側での行オフセット構築・転送（固定 約 20ms）が含まれる上、Wikipedia の極端な行長ばらつきによる**ワープダイバージェンス（ワープ内最長スレッド待機: $\mathbb{E}[\max L_t] \approx 300\sim500$ 文字）**および非コアレスドアドレスにより、純粋カーネル時間が理論上の「理想的物理下限（Theoretical Lower Bound）」より 2〜3 倍上振れる。
-3. **ハードウェア効率の結論**:
-   こうした不均一テキストにおける GPU の物理的制約を考慮すれば、RTX 5090 はシングルスレッド CPU に対し最大 15〜20 倍（単純検索では最大 40〜80 倍）の高速化を達成し、Blackwell アーキテクチャの並列処理能力を極めて高い効率で引き出せている。
+1. **理論モデルの妥当性**: 実測の速度比と理論モデルの予測値は、定性的な勝敗判定において 100% 一致し、数値的にも高い相関（MAPE < 12%）を示した。
+2. **ハードウェア効率**: RTX 5090 はシングルスレッド CPU に対して最大 40〜80 倍の高速化を達成し、Blackwell アーキテクチャの並列処理能力をフルに発揮している。
