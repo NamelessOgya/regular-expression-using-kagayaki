@@ -1,4 +1,5 @@
 __pycache__/*
+**/__pycache__/*
 .ipynb_checkpoints/*
 callback/*
 singularity/tmp/*
@@ -21,3 +22,5 @@ sprints/001/figures/fig3_gpu_improvement_vs_pre_cost.png
 
 build/**
 *.asan
+
+**.png

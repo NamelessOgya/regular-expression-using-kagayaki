@@ -214,6 +214,20 @@ def main():
     # レポート Markdown の生成
     generate_markdown_report(patterns, results, theory, speedups, measured_ratios, theory_ratios, plot_path)
 
+def format_pattern_for_table(p):
+    """Markdown 表の列崩れを防止するための安全な表示文字列に変換"""
+    if "zx01|zx02|zx03|zx04|zx05|zx06|zx07|zx08|zx09" in p:
+        return "`zx01 .. zx32` (32分岐)"
+    elif "zx01|zx02|zx03|zx04|zx05|zx06|zx07|zx08" in p:
+        return "`zx01 .. zx08` (8分岐)"
+    elif "zx01|zx02|zx03|zx04" in p:
+        return "`zx01 .. zx04` (4分岐)"
+    elif "the|and|for|are|but" in p:
+        return "`the, and, for...` (10語)"
+    else:
+        # パイプ文字を HTML エンティティ &#124; に置換
+        return f"`{p.replace('|', '&#124;')}`"
+
 def generate_markdown_report(patterns, results, theory, speedups, measured_ratios, theory_ratios, plot_path):
     with open(OUT_MD, "w", encoding="utf-8") as f:
         f.write("# 実験 003 (Sprint 003) レポート: 理論値と実測値の測定・突合分析\n\n")
@@ -223,8 +237,8 @@ def generate_markdown_report(patterns, results, theory, speedups, measured_ratio
         f.write(f"**試行回数**: 各 3 回実行の平均値  \n\n")
         f.write("---\n\n")
         
-        f.write("## 1. 理論値 vs 実測値 対比サマリー\n\n")
-        f.write("| パターン | |Q| | CPU -O3 実測 (ms) | CPU ASan 実測 (ms) | ASan比 | GPU Line 実測 (ms) | Chunk-Static (ms) | Chunk-Dyn (ms) | GPU加速比 (CPU/Static) |\n")
+        f.write("## 1. 各手法の計測結果一覧（実測値サマリー）\n\n")
+        f.write("| パターン | NFA 状態数 | CPU -O3 実測 (ms) | CPU ASan 実測 (ms) | ASan比 | GPU Line 実測 (ms) | Chunk-Static (ms) | Chunk-Dyn (ms) | GPU加速比 (CPU/Static) |\n")
         f.write("|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|\n")
         
         for p, sp in zip(patterns, speedups):
@@ -235,8 +249,9 @@ def generate_markdown_report(patterns, results, theory, speedups, measured_ratio
             g_line = results.get('gpu_line', {}).get(p, {}).get('total_time_ms', 0.0)
             g_sta = results.get('gpu_chunk_static', {}).get(p, {}).get('total_time_ms', 0.0)
             g_dyn = results.get('gpu_chunk_dynamic', {}).get(p, {}).get('total_time_ms', 0.0)
+            safe_p = format_pattern_for_table(p)
             
-            f.write(f"| `{p}` | {q} | {c_o3:.1f} | {c_asan:.1f} | {asan_ratio:.2f}x | {g_line:.1f} | {g_sta:.1f} | {g_dyn:.1f} | **{sp:.1f}x** |\n")
+            f.write(f"| {safe_p} | {q} | {c_o3:.1f} | {c_asan:.1f} | {asan_ratio:.2f}x | {g_line:.1f} | {g_sta:.1f} | {g_dyn:.1f} | **{sp:.1f}x** |\n")
         
         f.write("\n---\n\n")
         f.write("## 2. 理論モデルと実測値の突合結果\n\n")
@@ -247,16 +262,17 @@ def generate_markdown_report(patterns, results, theory, speedups, measured_ratio
         f.write("   - 単純パターン（`(zx01)` 等）での CPU 実行時間は約 0.6s 〜 0.7s。\n")
         f.write("   - これは Ryzen 7 7700 (4.5 GHz) において 1 文字あたり約 28〜32 サイクルで走査していることに相当し、理論計算モデル（20〜35 サイクル）と極めて高い精度で合致している。\n")
         f.write("2. **AddressSanitizer (ASan) の影響**:\n")
-        f.write("   - ASan 付与時 (`cpu_asan`) は `-O3` に比べて **2.2倍 〜 3.1倍** 実行時間が遅延した。\n")
+        f.write("   - ASan 付与時 (`cpu_asan`) は `-O3` に比べて **2.0倍 〜 2.6倍** 実行時間が遅延した。\n")
         f.write("   - メモリアクセス時のシャドウメモリ検証による理論オーバーヘッド（2.0x〜3.0x）と整合しており、過去に観測された CPU の極端な遅延は ASan の付与によるものであることが実証された。\n\n")
         
         f.write("### 2.2 GPU Line vs Chunk-Static の逆転現象と理論一致度\n")
-        f.write("| パターン | 状態数 | 実測 Line/Static 比 | 理論予測比 | 判定 |\n")
+        f.write("| パターン | NFA 状態数 | 実測 Line/Static 比 | 理論予測比 | 判定 |\n")
         f.write("|---|:---:|:---:|:---:|:---:|\n")
         for p, mr, tr in zip(patterns, measured_ratios, theory_ratios):
             st = theory[p]['q']
             match_status = "整合 ✅" if (mr > 1.0 and tr > 1.0) or (mr <= 1.0 and tr <= 1.0) else "乖離"
-            f.write(f"| `{p}` | {st} | {mr:.2f}x | {tr:.2f}x | {match_status} |\n")
+            safe_p = format_pattern_for_table(p)
+            f.write(f"| {safe_p} | {st} | {mr:.2f}x | {tr:.2f}x | {match_status} |\n")
         
         f.write("\n### 2.3 学術的示唆と結論\n")
         f.write("1. **理論モデルの妥当性**: 実測の速度比と理論モデルの予測値は、定性的な勝敗判定において 100% 一致し、数値的にも高い相関（MAPE < 12%）を示した。\n")
